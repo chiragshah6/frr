@@ -174,9 +174,6 @@ static int zebra_vrf_disable(struct vrf *vrf)
 		zlog_debug("VRF %s id %u is now inactive", zvrf_name(zvrf),
 			   zvrf_id(zvrf));
 
-	/* Stop any VxLAN-EVPN processing. */
-	zebra_vxlan_vrf_disable(zvrf);
-
 #if defined(HAVE_RTADV)
 	rtadv_vrf_terminate(zvrf);
 #endif
@@ -200,6 +197,9 @@ static int zebra_vrf_disable(struct vrf *vrf)
 		for (safi = SAFI_UNICAST; safi <= SAFI_MULTICAST; safi++)
 			rib_close_table(zvrf->table[afi][safi]);
 	}
+
+	/* Stop any VxLAN-EVPN processing. */
+	zebra_vxlan_vrf_disable(zvrf);
 
 	/* Cleanup Vxlan, MPLS and PW tables. */
 	zebra_vxlan_cleanup_tables(zvrf);

@@ -1333,8 +1333,17 @@ static void zl3vni_remote_rmac_del(zebra_l3vni_t *zl3vni, zebra_mac_t *zrmac,
 
 	if (RB_EMPTY(host_rb_tree_entry, &zrmac->host_rb)) {
 		/* uninstall from kernel */
-		zl3vni_rmac_uninstall(zl3vni, zrmac);
+		if (zl3vni_rmac_uninstall(zl3vni, zrmac) != 0) {
+			if (IS_ZEBRA_DEBUG_VXLAN) {
+				char buf[ETHER_ADDR_STRLEN];
 
+				zlog_debug(
+					"RMAC %s on L3-VNI %u couldn't be uninstalled",
+					prefix_mac2str(&zrmac->macaddr, buf,
+						       sizeof(buf)),
+					zl3vni->vni);
+			}
+		}
 		/* Send RMAC for FPM processing */
 		hook_call(zebra_rmac_update, zrmac, zl3vni, true,
 			  "RMAC deleted");
@@ -1454,8 +1463,20 @@ static int zl3vni_nh_uninstall(zebra_l3vni_t *zl3vni, zebra_neigh_t *n)
 	    || !(n->flags & ZEBRA_NEIGH_REMOTE_NH))
 		return 0;
 
-	if (!zl3vni->svi_if || !if_is_operative(zl3vni->svi_if))
+
+	if (!zl3vni->svi_if || !if_is_operative(zl3vni->svi_if)) {
+		if (IS_ZEBRA_DEBUG_VXLAN) {
+			char buf[INET6_ADDRSTRLEN];
+
+			zlog_debug(
+				"%s: nexthop %s on l3vni %u failed to uninstall -- svi %s is not operative",
+				vrf_id_to_name(zl3vni->vrf_id),
+				ipaddr2str(&n->ip, buf, sizeof(buf)),
+				zl3vni->vni,
+				zl3vni->svi_if ? zl3vni->svi_if->name : " ");
+		}
 		return 0;
+	}
 
 	dplane_rem_neigh_delete(zl3vni->svi_if, &n->ip);
 
@@ -2151,9 +2172,18 @@ void zebra_vxlan_evpn_vrf_route_del(vrf_id_t vrf_id,
 	zebra_mac_t *zrmac = NULL;
 
 	zl3vni = zl3vni_from_vrf(vrf_id);
-	if (!zl3vni)
-		return;
+	if (!zl3vni) {
+		if (IS_ZEBRA_DEBUG_VXLAN) {
+			char buf[INET6_ADDRSTRLEN];
+			char buf2[INET6_ADDRSTRLEN];
 
+			zlog_debug("%s: prefix %s vtep %s zl3vni NOT FOUND.",
+				   vrf_id_to_name(vrf_id),
+				   prefix2str(host_prefix, buf2, sizeof(buf2)),
+				   ipaddr2str(vtep_ip, buf, sizeof(buf)));
+		}
+		return;
+	}
 	/* find the next hop entry and rmac entry */
 	nh = zl3vni_nh_lookup(zl3vni, vtep_ip);
 	if (!nh)
@@ -5252,8 +5282,15 @@ int zebra_vxlan_vrf_disable(struct zebra_vrf *zvrf)
 	if (!zl3vni)
 		return 0;
 
-	zl3vni->vrf_id = VRF_UNKNOWN;
 	zebra_vxlan_process_l3vni_oper_down(zl3vni);
+
+	/* delete and uninstall all rmacs */
+	hash_iterate(zl3vni->rmac_table, zl3vni_del_rmac_hash_entry, zl3vni);
+	/* delete and uninstall all next-hops */
+	hash_iterate(zl3vni->nh_table, zl3vni_del_nh_hash_entry, zl3vni);
+
+	zl3vni->vrf_id = VRF_UNKNOWN;
+
 	return 0;
 }
 

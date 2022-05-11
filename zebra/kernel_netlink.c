@@ -404,6 +404,22 @@ static int netlink_information_fetch(struct nlmsghdr *h, ns_id_t ns_id, int star
 		return netlink_nexthop_change(h, ns_id, startup, arg);
 	case RTM_DELNEXTHOP:
 		return netlink_nexthop_change(h, ns_id, startup, arg);
+	case RTM_NEWQDISC:
+	case RTM_DELQDISC:
+		return netlink_qdisc_change(h, ns_id, startup);
+	case RTM_NEWTCLASS:
+	case RTM_DELTCLASS:
+		return netlink_tclass_change(h, ns_id, startup);
+	case RTM_NEWTFILTER:
+	case RTM_DELTFILTER:
+		return netlink_tfilter_change(h, ns_id, startup);
+	case RTM_NEWVLAN:
+		return netlink_vlan_change(h, ns_id, startup);
+	case RTM_DELVLAN:
+		return netlink_vlan_change(h, ns_id, startup);
+	case RTM_NEWTUNNEL:
+	case RTM_DELTUNNEL:
+		return netlink_vni_change(h, ns_id, startup);
 
 	/* Messages we may receive, but ignore */
 	case RTM_NEWCHAIN:
@@ -418,11 +434,7 @@ static int netlink_information_fetch(struct nlmsghdr *h, ns_id_t ns_id, int star
 	case RTM_DELADDR:
 	case RTM_NEWNETCONF:
 	case RTM_DELNETCONF:
-	case RTM_NEWTUNNEL:
-	case RTM_DELTUNNEL:
 	case RTM_GETTUNNEL:
-	case RTM_NEWVLAN:
-	case RTM_DELVLAN:
 	case RTM_NEWNEIGH:
 	case RTM_DELNEIGH:
 	case RTM_GETNEIGH:

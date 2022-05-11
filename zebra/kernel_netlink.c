@@ -435,6 +435,9 @@ static int netlink_information_fetch(struct nlmsghdr *h, ns_id_t ns_id,
 		return netlink_vlan_change(h, ns_id, startup);
 	case RTM_DELVLAN:
 		return netlink_vlan_change(h, ns_id, startup);
+	case RTM_NEWTUNNEL:
+	case RTM_DELTUNNEL:
+		return netlink_vni_change(h, ns_id, startup);
 
 	/* Messages we may receive, but ignore */
 	case RTM_NEWCHAIN:
@@ -447,8 +450,6 @@ static int netlink_information_fetch(struct nlmsghdr *h, ns_id_t ns_id,
 	case RTM_DELADDR:
 	case RTM_NEWNETCONF:
 	case RTM_DELNETCONF:
-	case RTM_NEWTUNNEL:
-	case RTM_DELTUNNEL:
 	case RTM_GETTUNNEL:
 		return 0;
 	default:

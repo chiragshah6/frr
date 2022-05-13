@@ -36,6 +36,16 @@ extern bool nl_attr_put32(struct nlmsghdr *n, unsigned int maxlen, int type,
 extern bool nl_attr_put64(struct nlmsghdr *n, unsigned int maxlen, int type,
 			  uint64_t data);
 
+extern int nl_rta_put(struct rtattr *rta, unsigned int maxlen, int type,
+		      const void *data, int alen);
+extern bool nl_rta_put16(struct rtattr *rta, unsigned int maxlen, int type,
+			  uint16_t data);
+extern bool nl_rta_put64(struct rtattr *rta, unsigned int maxlen, int type,
+			uint64_t data);
+extern struct rtattr *nl_rta_nest(struct rtattr *rta, unsigned int maxlen,
+				  int type);
+extern int nl_rta_nest_end(struct rtattr *rta, struct rtattr *nest);
+
 /*
  * nl_attr_nest - start an attribute nest.
  *

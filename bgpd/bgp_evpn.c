@@ -3087,11 +3087,11 @@ static int install_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 			SET_IPADDR_V4(&nhip);
 			IPV4_ADDR_COPY(&nhip.ipaddr_v4, &pi->attr->nexthop);
 		}
-		zlog_debug("... %s pi %s dest %p (l %d) pi %p (l %d, f 0x%x) nh %pIA",
+		zlog_debug("... %s pi %s dest %p (l %d) pi %p (l %d, f 0x%x) use_l3nhg %u nh %pIA",
 			   new_pi ? "new" : "update",
 			   bgp_vrf->name_pretty, dest,
 			   bgp_dest_get_lock_count(dest), pi, pi->lock,
-			   pi->flags, &nhip);
+			   pi->flags, use_l3nhg, &nhip);
 	}
 
 	bgp_dest_unlock_node(dest);

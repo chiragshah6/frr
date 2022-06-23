@@ -1674,7 +1674,7 @@ void bgp_zebra_announce(struct bgp_dest *dest, const struct prefix *p,
 
 	if (bgp_debug_zebra(p)) {
 		zlog_debug(
-			"Tx route %s VRF %u %pFX metric %u tag %" ROUTE_TAG_PRI
+			"Tx route %s VRF %u %pFX metric %u distance %u tag %" ROUTE_TAG_PRI
 			" count %d nhg %d",
 			is_add ? "add" : "delete", bgp->vrf_id, &api.prefix,
 			api.metric, api.tag, api.nexthop_num, nhg_id);

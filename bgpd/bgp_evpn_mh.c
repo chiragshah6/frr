@@ -3038,11 +3038,18 @@ static void bgp_evpn_l3nhg_zebra_add_v4_or_v6(struct bgp_evpn_es_vrf *es_vrf,
 
 		++api_nhg.nexthop_num;
 		if (BGP_DEBUG(evpn_mh, EVPN_MH_ES))
-			zlog_debug("nhg %u %pNHv vtep %pIA l3-svi %d %s", api_nhg.id, &nh,
+			zlog_debug("nhg %u %pNHv vtep %pIA l3-svi %d %s vxlan_if %d %s ", api_nhg.id, &nh,
 				   &es_vtep->vtep_ip, es_vrf->bgp_vrf->l3vni_svi_ifindex,
 				   (es_vrf->bgp_vrf->l3vni_svi_ifindex ?
 					ifindex2ifname(es_vrf->bgp_vrf->l3vni_svi_ifindex,
-					   es_vrf->bgp_vrf->vrf_id) : "NIL"));
+					   es_vrf->bgp_vrf->vrf_id) : "NIL"),
+				   es_vrf->bgp_vrf->evpn_info->vxlan_ifindex,
+				(es_vrf->bgp_vrf->evpn_info->vxlan_ifindex
+					 ? ifindex2ifname(
+						   es_vrf->bgp_vrf->evpn_info
+							   ->vxlan_ifindex,
+						   es_vrf->bgp_vrf->vrf_id)
+ 					 : "NIL"));
 		frrtrace(3, frr_bgp, evpn_mh_nh_zsend, nhg_id, es_vtep, es_vrf);
 	}
 

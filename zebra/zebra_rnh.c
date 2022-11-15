@@ -62,7 +62,8 @@ static void free_state(vrf_id_t vrf_id, struct route_entry *re,
 static void copy_state(struct rnh *rnh, const struct route_entry *re,
 		       struct route_node *rn);
 static bool compare_state(struct route_entry *r1, struct route_entry *r2);
-static void print_rnh(struct route_node *rn, struct vty *vty);
+static void print_rnh(struct route_node *rn, struct vty *vty,
+		      json_object *json);
 static int zebra_client_cleanup_rnh(struct zserv *client);
 
 void zebra_rnh_init(void)
@@ -803,7 +804,8 @@ void zebra_evaluate_rnh(struct zebra_vrf *zvrf, afi_t afi, int force,
 }
 
 void zebra_print_rnh_table(vrf_id_t vrfid, afi_t afi, safi_t safi,
-			   struct vty *vty, const struct prefix *p)
+			   struct vty *vty, const struct prefix *p,
+			   json_object *json)
 {
 	struct route_table *table;
 	struct route_node *rn;
@@ -820,7 +822,7 @@ void zebra_print_rnh_table(vrf_id_t vrfid, afi_t afi, safi_t safi,
 			continue;
 
 		if (rn->info)
-			print_rnh(rn, vty);
+			print_rnh(rn, vty, json);
 	}
 }
 
@@ -1268,7 +1270,8 @@ failure:
 	return -1;
 }
 
-static void print_nh(struct nexthop *nexthop, struct vty *vty)
+static void print_nh(struct nexthop *nexthop, struct vty *vty,
+		     json_object *json)
 {
 	char buf[BUFSIZ];
 	struct zebra_ns *zns = zebra_ns_lookup(nexthop->vrf_id);
@@ -1302,39 +1305,113 @@ static void print_nh(struct nexthop *nexthop, struct vty *vty)
 	vty_out(vty, "\n");
 }
 
-static void print_rnh(struct route_node *rn, struct vty *vty)
+static void print_rnh(struct route_node *rn, struct vty *vty, json_object *json)
 {
 	struct rnh *rnh;
 	struct nexthop *nexthop;
 	struct listnode *node;
 	struct zserv *client;
 	char buf[BUFSIZ];
+	json_object *json_nht = NULL;
+	json_object *json_client_array = NULL;
+	json_object *json_client = NULL;
+	json_object *json_nexthop_array = NULL;
+	json_object *json_nexthop = NULL;
 
 	rnh = rn->info;
-	vty_out(vty, "%s%s\n",
-		inet_ntop(rn->p.family, &rn->p.u.prefix, buf, BUFSIZ),
-		CHECK_FLAG(rnh->flags, ZEBRA_NHT_CONNECTED) ? "(Connected)"
-							    : "");
+
+	if (json) {
+		json_nht = json_object_new_object();
+		json_nexthop_array = json_object_new_array();
+		json_client_array = json_object_new_array();
+
+		json_object_object_add(
+			json,
+			inet_ntop(rn->p.family, &rn->p.u.prefix, buf, BUFSIZ),
+			json_nht);
+
+		if (CHECK_FLAG(rnh->flags, ZEBRA_NHT_CONNECTED))
+			json_object_boolean_true_add(json_nht, "nhtConnected");
+		else
+			json_object_boolean_false_add(json_nht, "nhtConnected");
+
+		json_object_object_add(json_nht, "clientList",
+				       json_client_array);
+		json_object_object_add(json_nht, "gates", json_nexthop_array);
+	} else {
+		vty_out(vty, "%s%s\n",
+			inet_ntop(rn->p.family, &rn->p.u.prefix, buf, BUFSIZ),
+			CHECK_FLAG(rnh->flags, ZEBRA_NHT_CONNECTED)
+				? "(Connected)"
+				: "");
+	}
+
 	if (rnh->state) {
-		vty_out(vty, " resolved via %s\n",
-			zebra_route_string(rnh->state->type));
+		if (json)
+			json_object_string_add(
+				json_nht, "resolvedProtocol",
+				zebra_route_string(rnh->state->type));
+		else
+			vty_out(vty, " resolved via %s\n",
+				zebra_route_string(rnh->state->type));
+
 		for (nexthop = rnh->state->nhe->nhg.nexthop; nexthop;
-		     nexthop = nexthop->next)
-			print_nh(nexthop, vty);
-	} else
+		     nexthop = nexthop->next) {
+			if (json) {
+				json_nexthop = json_object_new_object();
+				json_object_array_add(json_nexthop_array,
+						      json_nexthop);
+			}
+
+			print_nh(nexthop, vty, json_nexthop);
+		}
+	} else if (json) {
+		if (CHECK_FLAG(rnh->flags, ZEBRA_NHT_CONNECTED))
+			json_object_boolean_true_add(json_nht, "unresolved");
+		else
+			json_object_boolean_false_add(json_nht, "unresolved");
+	} else {
 		vty_out(vty, " unresolved%s\n",
 			CHECK_FLAG(rnh->flags, ZEBRA_NHT_CONNECTED)
 				? "(Connected)"
 				: "");
+	}
 
-	vty_out(vty, " Client list:");
-	for (ALL_LIST_ELEMENTS_RO(rnh->client_list, node, client))
-		vty_out(vty, " %s(fd %d)%s", zebra_route_string(client->proto),
-			client->sock,
-			rnh->filtered[client->proto] ? "(filtered)" : "");
-	if (!list_isempty(rnh->zebra_pseudowire_list))
-		vty_out(vty, " zebra[pseudowires]");
-	vty_out(vty, "\n");
+	if (!json)
+		vty_out(vty, " Client list:");
+
+	for (ALL_LIST_ELEMENTS_RO(rnh->client_list, node, client)) {
+		if (json) {
+			json_client = json_object_new_object();
+			json_object_array_add(json_client_array, json_client);
+
+			json_object_string_add(
+				json_client, "protocol",
+				zebra_route_string(client->proto));
+			json_object_int_add(json_client, "socket",
+					    client->sock);
+			json_object_string_add(json_client, "protocolFiltered",
+					       (rnh->filtered[client->proto]
+							? "(filtered)"
+							: "none"));
+		} else {
+			vty_out(vty, " %s(fd %d)%s",
+				zebra_route_string(client->proto), client->sock,
+				rnh->filtered[client->proto] ? "(filtered)"
+							     : "");
+		}
+	}
+
+	if (!list_isempty(rnh->zebra_pseudowire_list)) {
+		if (json)
+			json_object_string_add(json_nht, "zebraPseudowires",
+					       "zebra[pseudowires]");
+		else
+			vty_out(vty, " zebra[pseudowires]");
+	}
+
+	if (!json)
+		vty_out(vty, "\n");
 }
 
 static int zebra_cleanup_rnh_client(vrf_id_t vrf_id, afi_t afi, safi_t safi,

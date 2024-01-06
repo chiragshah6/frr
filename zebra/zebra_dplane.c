@@ -700,6 +700,9 @@ static struct zebra_dplane_globals {
 	_Atomic uint32_t dg_srv6_encap_srcaddr_set_in;
 	_Atomic uint32_t dg_srv6_encap_srcaddr_set_errors;
 
+	_Atomic uint32_t dg_l3svd_vni_in;
+	_Atomic uint32_t dg_l3svd_vni_errors;
+
 	/* Dataplane pthread */
 	struct frr_pthread *dg_pthread;
 
@@ -948,6 +951,11 @@ static void dplane_ctx_free_internal(struct zebra_dplane_ctx *ctx)
 			XFREE(MTYPE_TMP, ctx->u.intf.vniarray);
 		if (ctx->u.intf.bvarray)
 			XFREE(MTYPE_TMP, ctx->u.intf.bvarray);
+		break;
+	case DPLANE_OP_L3SVD_VNI_ADD:
+	case DPLANE_OP_L3SVD_VNI_DELETE:
+		if (ctx->u.intf.vniarray)
+			XFREE(MTYPE_TMP, ctx->u.intf.vniarray);
 		break;
 	case DPLANE_OP_INTF_DELETE:
 	case DPLANE_OP_TC_QDISC_INSTALL:
@@ -1281,6 +1289,10 @@ const char *dplane_op2str(enum dplane_op_e op)
 		return "TC_FILTER_DELETE";
 	case DPLANE_OP_TC_FILTER_UPDATE:
 		return "TC__FILTER_UPDATE";
+	case DPLANE_OP_L3SVD_VNI_ADD:
+		return "L3SVD_VNI_ADD";
+	case DPLANE_OP_L3SVD_VNI_DELETE:
+		return  "L3SVD_VNI_DELETE";
 	case DPLANE_OP_STARTUP_STAGE:
 		return "STARTUP_STAGE";
 
@@ -7428,6 +7440,12 @@ static void kernel_dplane_log_detail(struct zebra_dplane_ctx *ctx)
 	case DPLANE_OP_TC_FILTER_ADD:
 	case DPLANE_OP_TC_FILTER_DELETE:
 	case DPLANE_OP_TC_FILTER_UPDATE:
+	case DPLANE_OP_L3SVD_VNI_ADD:
+	case DPLANE_OP_L3SVD_VNI_DELETE:
+		zlog_debug("Dplane L3SVD VNI %s, idx %u",
+			   dplane_op2str(dplane_ctx_get_op(ctx)),
+			   dplane_ctx_get_ifindex(ctx));
+		break;
 	case DPLANE_OP_STARTUP_STAGE:
 		break;
 
@@ -7637,6 +7655,13 @@ static void kernel_dplane_handle_result(struct zebra_dplane_ctx *ctx)
 	case DPLANE_OP_VLAN_INSTALL:
 		break;
 
+	case DPLANE_OP_L3SVD_VNI_ADD:
+	case DPLANE_OP_L3SVD_VNI_DELETE:
+		if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)
+			atomic_fetch_add_explicit(&zdplane_info
+							   .dg_l3svd_vni_errors,
+						  1, memory_order_relaxed);
+		break;
 	case DPLANE_OP_SRV6_ENCAP_SRCADDR_SET:
 		if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)
 			atomic_fetch_add_explicit(&zdplane_info

@@ -1050,6 +1050,8 @@ static int fpm_nl_enqueue(struct fpm_nl_ctx *fnc, struct zebra_dplane_ctx *ctx)
 	case DPLANE_OP_TC_FILTER_DELETE:
 	case DPLANE_OP_TC_FILTER_UPDATE:
 	case DPLANE_OP_SRV6_ENCAP_SRCADDR_SET:
+	case DPLANE_OP_L3SVD_VNI_ADD:
+	case DPLANE_OP_L3SVD_VNI_DELETE:
 	case DPLANE_OP_NONE:
 	case DPLANE_OP_STARTUP_STAGE:
 		break;

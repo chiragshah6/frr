@@ -2230,6 +2230,90 @@ static void zebra_if_dplane_ifp_handling(struct zebra_dplane_ctx *ctx)
 	}
 }
 
+void zebra_l3svd_dplane_vni_result(struct zebra_dplane_ctx *ctx)
+{
+	struct zebra_ns *zns;
+	struct interface *ifp;
+	struct zebra_if *zif;
+	ns_id_t ns_id;
+	enum dplane_op_e op;
+	ifindex_t ifindex;
+	struct hash *vni_table = NULL;
+	const struct zebra_vxlan_vni_array *vniarray;
+	struct zebra_vxlan_vni vni = { 0 }, *vnip;
+	vni_t vni_id;
+	struct zebra_vxlan_vni vni_start = { 0 }, vni_end = { 0 };
+	int i;
+
+	ns_id = dplane_ctx_get_ns_id(ctx);
+	op = dplane_ctx_get_op(ctx);
+	ifindex = dplane_ctx_get_ifindex(ctx);
+
+	zns = zebra_ns_lookup(ns_id);
+	if (zns == NULL) {
+		if (IS_ZEBRA_DEBUG_KERNEL)
+			zlog_debug("%s: can't find zns id %u", __func__, ns_id);
+		return;
+	}
+
+	ifp = if_lookup_by_index_per_ns(zns, ifindex);
+	if (!ifp) {
+		if (IS_ZEBRA_DEBUG_KERNEL)
+			zlog_debug("Cannot find IF (%u) for vni update",
+				   ifindex);
+		return;
+	}
+
+	zif = (struct zebra_if *)ifp->info;
+	if (!IS_ZEBRA_VXLAN_IF_L3SVD(zif)) {
+		if (IS_ZEBRA_DEBUG_KERNEL)
+			zlog_debug("%s ifp %s is not L3SVD skip vni event",
+				   __func__, ifp->name);
+		return;
+	}
+
+	vniarray = dplane_ctx_get_ifp_vxlan_vni_array(ctx);
+	if (!vniarray)
+		return;
+
+	for (i = 0; i < vniarray->count; i++) {
+		uint16_t flags = vniarray->vnis[i].flags;
+
+		if (flags & DPLANE_BRIDGE_VLAN_INFO_RANGE_BEGIN) {
+			vni_start = vniarray->vnis[i];
+			vni_end = vniarray->vnis[i];
+			continue;
+		}
+
+		if (flags & DPLANE_BRIDGE_VLAN_INFO_RANGE_END)
+			vni_end = vniarray->vnis[i];
+	}
+	if (!vni_table) {
+		vni_table = zebra_vxlan_vni_table_create();
+		if (!vni_table)
+			return;
+	}
+
+	for (vni_id = vni_start.vni; vni_id <= vni_end.vni; vni_id++) {
+		vni.vni = vni_id;
+		vni.access_vlan = 0;
+		vnip = hash_get(vni_table, &vni, zebra_vxlan_vni_alloc);
+		if (!vnip)
+			return;
+	}
+
+	if (IS_ZEBRA_DEBUG_KERNEL)
+		zlog_debug("%s Dequeuing: Rx %s IF %s(%u) vni %u", __func__,
+			   dplane_op2str(op), ifp->name, ifindex, vni_start.vni);
+
+	if (op == DPLANE_OP_L3SVD_VNI_ADD) {
+		if (vni_table && hashcount(vni_table))
+			zebra_vxlan_if_vni_table_add_update(ifp, vni_table);
+	} else if (op == DPLANE_OP_L3SVD_VNI_DELETE) {
+		zebra_vxlan_if_vni_del(ifp, vni_start.vni);
+	}
+}
+
 void zebra_if_dplane_result(struct zebra_dplane_ctx *ctx)
 {
 	struct zebra_ns *zns;

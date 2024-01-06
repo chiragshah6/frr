@@ -435,9 +435,6 @@ static int netlink_information_fetch(struct nlmsghdr *h, ns_id_t ns_id,
 		return netlink_vlan_change(h, ns_id, startup);
 	case RTM_DELVLAN:
 		return netlink_vlan_change(h, ns_id, startup);
-	case RTM_NEWTUNNEL:
-	case RTM_DELTUNNEL:
-		return netlink_vni_change(h, ns_id, startup);
 
 	/* Messages we may receive, but ignore */
 	case RTM_NEWCHAIN:
@@ -493,6 +490,10 @@ static int dplane_netlink_information_fetch(struct nlmsghdr *h, ns_id_t ns_id,
 	case RTM_NEWLINK:
 	case RTM_DELLINK:
 		return netlink_link_change(h, ns_id, startup);
+
+	case RTM_NEWTUNNEL:
+	case RTM_DELTUNNEL:
+		return netlink_vni_change(h, ns_id, startup);
 
 	default:
 		break;
@@ -1677,6 +1678,8 @@ static enum netlink_msg_status nl_put_msg(struct nl_batch *bth,
 	case DPLANE_OP_GRE_SET:
 		return netlink_put_gre_set_msg(bth, ctx);
 
+	case DPLANE_OP_L3SVD_VNI_ADD:
+	case DPLANE_OP_L3SVD_VNI_DELETE:
 	case DPLANE_OP_INTF_ADDR_ADD:
 	case DPLANE_OP_INTF_ADDR_DEL:
 	case DPLANE_OP_NONE:
@@ -1840,7 +1843,7 @@ void kernel_init(struct zebra_ns *zns)
 	snprintf(zns->netlink.name, sizeof(zns->netlink.name),
 		 "netlink-listen (NS %u)", zns->ns_id);
 	zns->netlink.sock = -1;
-	if (netlink_socket(&zns->netlink, groups, &ext_groups, 1, zns->ns_id,
+	if (netlink_socket(&zns->netlink, groups, 0, 0, zns->ns_id,
 			   NETLINK_ROUTE) < 0) {
 		zlog_err("Failure to create %s socket",
 			 zns->netlink.name);
@@ -1880,8 +1883,8 @@ void kernel_init(struct zebra_ns *zns)
 		 sizeof(zns->netlink_dplane_in.name), "netlink-dp-in (NS %u)",
 		 zns->ns_id);
 	zns->netlink_dplane_in.sock = -1;
-	if (netlink_socket(&zns->netlink_dplane_in, dplane_groups, 0, 0,
-			   zns->ns_id, NETLINK_ROUTE) < 0) {
+	if (netlink_socket(&zns->netlink_dplane_in, dplane_groups, &ext_groups,
+			   1, zns->ns_id, NETLINK_ROUTE) < 0) {
 		zlog_err("Failure to create %s socket",
 			 zns->netlink_dplane_in.name);
 		exit(-1);

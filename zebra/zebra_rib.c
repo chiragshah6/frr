@@ -4936,6 +4936,11 @@ static void rib_process_dplane_results(struct event *thread)
 				zebra_if_dplane_result(ctx);
 				break;
 
+			case DPLANE_OP_L3SVD_VNI_ADD:
+			case DPLANE_OP_L3SVD_VNI_DELETE:
+				zebra_l3svd_dplane_vni_result(ctx);
+				break;
+
 			case DPLANE_OP_TC_QDISC_INSTALL:
 			case DPLANE_OP_TC_QDISC_UNINSTALL:
 			case DPLANE_OP_TC_CLASS_ADD:

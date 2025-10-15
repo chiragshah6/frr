@@ -42,6 +42,136 @@ from lib.evpn import (
 
 pytestmark = [pytest.mark.evpn]
 
+# VTEP source IP addresses by underlay version
+VTEP_IPS = {
+    "ipv6": {
+        "bordertor-11": "2006:20:20::1",
+        "bordertor-12": "2006:20:20::2",
+        "tor-21": "2006:20:20::30",
+        "tor-22": "2006:20:20::31",
+    },
+    "ipv4": {
+        "bordertor-11": "6.0.0.1",
+        "bordertor-12": "6.0.0.2",
+        "tor-21": "6.0.0.30",
+        "tor-22": "6.0.0.31",
+    },
+}
+
+
+@pytest.fixture(scope="module", params=["ipv4", "ipv6"])
+def tgen_and_ip_version(request):
+    """
+    Fixture to setup topology with parametrized IPv4/IPv6 underlay
+
+    Returns:
+        tuple: (tgen, ip_version)
+    """
+    ip_version = request.param
+
+    # Check kernel version
+    result = required_linux_kernel_version("5.15")
+    if result is not True:
+        pytest.skip("Kernel requirements are not met, kernel version should be >= 5.15")
+
+    # This function initiates the topology build with Topogen
+    tgen = Topogen(build_topo, request.module.__name__)
+
+    # ... and here it calls Mininet initialization functions.
+    tgen.start_topology()
+
+    # Determine config directory based on IP version
+    config_dir = os.path.join(CWD, ip_version)
+    logger.info(f"Running test with {ip_version} underlay configuration from {config_dir}")
+
+    # Get VTEP IPs for this IP version
+    vtep_ips = VTEP_IPS[ip_version]
+
+    # Configure SVD on all 4 VTEPs using appropriate VTEP source IPs
+    # Border ToRs
+    setup_vtep(tgen, "bordertor-11", vtep_ips["bordertor-11"], is_bordertor=True)
+    setup_vtep(tgen, "bordertor-12", vtep_ips["bordertor-12"], is_bordertor=True)
+
+    # ToRs
+    setup_vtep(tgen, "tor-21", vtep_ips["tor-21"], is_bordertor=False)
+    setup_vtep(tgen, "tor-22", vtep_ips["tor-22"], is_bordertor=False)
+
+    # Configure BorderToR to external router connectivity
+    setup_bordertor_ext_connectivity(tgen, ip_version)
+
+    # Configure external router
+    setup_ext1(tgen, ip_version)
+
+    # Load FRR configuration for all routers from IP-version-specific directory
+    router_list = tgen.routers()
+
+    for rname, router in router_list.items():
+        conf_file = os.path.join(config_dir, rname, "frr.conf")
+        if os.path.exists(conf_file):
+            logger.info(f"Loading {ip_version} configuration for {rname}")
+            router.load_frr_config(conf_file)
+        else:
+            logger.warning(f"Config file not found: {conf_file}")
+
+    # Start all routers
+    tgen.start_router()
+
+    # Trigger ARP/NDP to populate MAC tables
+    logger.info("Triggering ARP/NDP for MAC learning")
+
+    # Define VLAN interfaces and their host-gateway mappings
+    vlan_host_gateways = {
+        "swp1": {  # VLAN 111 (VRF2) - 60.1.1.0/24
+            "host-111": "60.1.1.11",
+            "host-121": "60.1.1.12",
+            "host-211": "60.1.1.21",
+            "host-221": "60.1.1.22",
+        },
+        "swp2": {  # VLAN 112 (VRF1) - 50.1.1.0/24
+            "host-211": "50.1.1.21",
+            "host-221": "50.1.1.22",
+        },
+    }
+
+    # Trigger ARP for each VLAN interface
+    for interface, host_gateways in vlan_host_gateways.items():
+        logger.info(f"Triggering ARP on {interface} for {len(host_gateways)} hosts")
+        evpn_trigger_arp_scapy(tgen, host_gateways, interface=interface)
+
+    # Yield control to tests
+    yield tgen, ip_version
+
+    # Teardown - Cleanup VXLAN interfaces and bridges on all VTEPs before stopping
+    logger.info("Cleaning up VXLAN interfaces on all VTEPs")
+    for rname in ["bordertor-11", "bordertor-12", "tor-21", "tor-22"]:
+        if rname in tgen.gears:
+            router = tgen.gears[rname]
+            logger.info(f"Cleaning up interfaces on {rname}")
+
+            # Bring interfaces down first
+            router.run("ip link set dev vlan111 down 2>/dev/null || true")
+            router.run("ip link set dev vlan112 down 2>/dev/null || true")
+            router.run("ip link set dev vlan4001 down 2>/dev/null || true")
+            router.run("ip link set dev vlan4002 down 2>/dev/null || true")
+            router.run("ip link set dev vxlan48 down 2>/dev/null || true")
+            router.run("ip link set dev vxlan99 down 2>/dev/null || true")
+            router.run("ip link set dev br_default down 2>/dev/null || true")
+            router.run("ip link set dev br_l3vni down 2>/dev/null || true")
+
+            # Delete in dependency order
+            router.run("ip link del vlan111 2>/dev/null || true")
+            router.run("ip link del vlan112 2>/dev/null || true")
+            router.run("ip link del vlan4001 2>/dev/null || true")
+            router.run("ip link del vlan4002 2>/dev/null || true")
+            router.run("ip link del vxlan48 2>/dev/null || true")
+            router.run("ip link del vxlan99 2>/dev/null || true")
+            router.run("ip link del br_default 2>/dev/null || true")
+            router.run("ip link del br_l3vni 2>/dev/null || true")
+            router.run("ip link del vrf1 2>/dev/null || true")
+            router.run("ip link del vrf2 2>/dev/null || true")
+
+    tgen.stop_topology()
+
 
 def build_topo(tgen):
     """
@@ -198,7 +328,7 @@ def build_topo(tgen):
     switch.add_link(tgen.gears["host-1"], nodeif="swp4")
 
 
-def setup_vtep(tgen, rname, local_ipv6, is_bordertor=True):
+def setup_vtep(tgen, rname, local_ip, is_bordertor=True):
     """
     Configure TRUE Single VXLAN Device (SVD) on VTEPs (border ToRs and ToRs)
     Uses ONE vxlan device (vxlan48) for ALL VNIs (both L2 and L3)
@@ -206,7 +336,7 @@ def setup_vtep(tgen, rname, local_ipv6, is_bordertor=True):
     """
     router = tgen.gears[rname]
 
-    logger.info(f"Configuring TRUE SVD on {rname} with VTEP {local_ipv6}")
+    logger.info(f"Configuring TRUE SVD on {rname} with VTEP {local_ip}")
 
     # Cleanup any existing interfaces from previous runs
     logger.info(f"Cleaning up existing interfaces on {rname}")
@@ -257,7 +387,7 @@ def setup_vtep(tgen, rname, local_ipv6, is_bordertor=True):
 
     # Create ONE Single VXLAN Device for ALL VNIs (both L2 and L3)
     router.run(
-        f"ip link add vxlan48 type vxlan dstport 4789 local {local_ipv6} nolearning external ttl 64 ageing 18000"
+        f"ip link add vxlan48 type vxlan dstport 4789 local {local_ip} nolearning external ttl 64 ageing 18000"
     )
     router.run("ip link set dev vxlan48 master br_default")
     router.run("bridge link set dev vxlan48 vlan_tunnel on")
@@ -374,9 +504,13 @@ def setup_vtep(tgen, rname, local_ipv6, is_bordertor=True):
         router.run(f"bridge vlan add vid 112 pvid untagged dev {intf}")
 
 
-def setup_bordertor_ext_connectivity(tgen):
+def setup_bordertor_ext_connectivity(tgen, ip_version):
     """
     Configure BorderToR interfaces for external router connectivity
+
+    Args:
+        tgen: Topogen instance
+        ip_version: IP version for underlay ("ipv4" or "ipv6")
     """
     # Configure bordertor-11
     router = tgen.gears["bordertor-11"]
@@ -387,14 +521,16 @@ def setup_bordertor_ext_connectivity(tgen):
     router.run("ip link add link swp3 name swp3.4001 type vlan id 4001")
     router.run("ip link set dev swp3.4001 master vrf1")
     router.run("ip addr add 144.1.1.2/30 dev swp3.4001")
-    router.run("ip addr add 2144:1:1:1::2/64 dev swp3.4001")
+    if ip_version == "ipv6":
+        router.run("ip addr add 2144:1:1:1::2/64 dev swp3.4001")
     router.run("ip link set dev swp3.4001 up")
 
     # swp3.4002 for VRF2 L3VNI
     router.run("ip link add link swp3 name swp3.4002 type vlan id 4002")
     router.run("ip link set dev swp3.4002 master vrf2")
     router.run("ip addr add 144.1.1.6/30 dev swp3.4002")
-    router.run("ip addr add 2144:1:1:2::6/64 dev swp3.4002")
+    if ip_version == "ipv6":
+        router.run("ip addr add 2144:1:1:2::6/64 dev swp3.4002")
     router.run("ip link set dev swp3.4002 up")
 
     # Configure bordertor-12
@@ -406,54 +542,66 @@ def setup_bordertor_ext_connectivity(tgen):
     router.run("ip link add link swp3 name swp3.4001 type vlan id 4001")
     router.run("ip link set dev swp3.4001 master vrf1")
     router.run("ip addr add 144.2.1.2/30 dev swp3.4001")
-    router.run("ip addr add 2144:2:1:1::2/64 dev swp3.4001")
+    if ip_version == "ipv6":
+        router.run("ip addr add 2144:2:1:1::2/64 dev swp3.4001")
     router.run("ip link set dev swp3.4001 up")
 
     # swp3.4002 for VRF2 L3VNI
     router.run("ip link add link swp3 name swp3.4002 type vlan id 4002")
     router.run("ip link set dev swp3.4002 master vrf2")
     router.run("ip addr add 144.2.1.6/30 dev swp3.4002")
-    router.run("ip addr add 2144:2:1:2::6/64 dev swp3.4002")
+    if ip_version == "ipv6":
+        router.run("ip addr add 2144:2:1:2::6/64 dev swp3.4002")
     router.run("ip link set dev swp3.4002 up")
 
 
-def setup_ext1(tgen):
+def setup_ext1(tgen, ip_version):
     """
     Configure external router ext-1 interfaces
+
+    Args:
+        tgen: Topogen instance
+        ip_version: IP version for underlay ("ipv4" or "ipv6")
     """
     router = tgen.gears["ext-1"]
 
-    logger.info("Configuring ext-1 interfaces")
+    logger.info(f"Configuring ext-1 interfaces for {ip_version} underlay")
 
     # Configure swp1 - Connected to bordertor-11
     router.run("ip link set dev swp1 up")
-    router.run("ip addr add 2010:2254::2:0:2/126 dev swp1")
+    if ip_version == "ipv6":
+        router.run("ip addr add 2010:2254::2:0:2/126 dev swp1")
+    else:  # ipv4
+        router.run("ip addr add 10.254.0.10/30 dev swp1")
 
     # Configure swp2 - Connected to bordertor-12
     router.run("ip link set dev swp2 up")
-    router.run("ip addr add 2010:2254::9:0:2/126 dev swp2")
+    if ip_version == "ipv6":
+        router.run("ip addr add 2010:2254::9:0:2/126 dev swp2")
+    else:  # ipv4
+        router.run("ip addr add 10.254.0.38/30 dev swp2")
 
     # Configure VLAN sub-interfaces on swp1 for bordertor-11
-    # swp1.4001 for VRF1 L3VNI connectivity
+    # swp1.4001 for VRF1 L3VNI connectivity - always configure both IPv4 and IPv6
     router.run("ip link add link swp1 name swp1.4001 type vlan id 4001")
     router.run("ip addr add 144.1.1.1/30 dev swp1.4001")
     router.run("ip addr add 2144:1:1:1::1/64 dev swp1.4001")
     router.run("ip link set dev swp1.4001 up")
 
-    # swp1.4002 for VRF2 L3VNI connectivity
+    # swp1.4002 for VRF2 L3VNI connectivity - always configure both IPv4 and IPv6
     router.run("ip link add link swp1 name swp1.4002 type vlan id 4002")
     router.run("ip addr add 144.1.1.5/30 dev swp1.4002")
     router.run("ip addr add 2144:1:1:2::5/64 dev swp1.4002")
     router.run("ip link set dev swp1.4002 up")
 
     # Configure VLAN sub-interfaces on swp2 for bordertor-12
-    # swp2.4001 for VRF1 L3VNI connectivity
+    # swp2.4001 for VRF1 L3VNI connectivity - always configure both IPv4 and IPv6
     router.run("ip link add link swp2 name swp2.4001 type vlan id 4001")
     router.run("ip addr add 144.2.1.1/30 dev swp2.4001")
     router.run("ip addr add 2144:2:1:1::1/64 dev swp2.4001")
     router.run("ip link set dev swp2.4001 up")
 
-    # swp2.4002 for VRF2 L3VNI connectivity
+    # swp2.4002 for VRF2 L3VNI connectivity - always configure both IPv4 and IPv6
     router.run("ip link add link swp2 name swp2.4002 type vlan id 4002")
     router.run("ip addr add 144.2.1.5/30 dev swp2.4002")
     router.run("ip addr add 2144:2:1:2::5/64 dev swp2.4002")
@@ -473,105 +621,7 @@ def setup_ext1(tgen):
             logger.info(f"Interface {intf} does not exist on ext-1, skipping")
 
 
-def setup_module(mod):
-    """Sets up the pytest environment"""
-
-    # Check kernel version
-    result = required_linux_kernel_version("5.7")
-    if result is not True:
-        pytest.skip("Kernel requirements are not met, kernel version should be >= 5.7")
-
-    # This function initiates the topology build with Topogen
-    tgen = Topogen(build_topo, mod.__name__)
-
-    # ... and here it calls Mininet initialization functions.
-    tgen.start_topology()
-
-    # Configure SVD on all 4 VTEPs using their loopback IPv6 addresses
-    # Border ToRs
-    setup_vtep(tgen, "bordertor-11", "2006:20:20::1", is_bordertor=True)
-    setup_vtep(tgen, "bordertor-12", "2006:20:20::2", is_bordertor=True)
-
-    # ToRs
-    setup_vtep(tgen, "tor-21", "2006:20:20::30", is_bordertor=False)
-    setup_vtep(tgen, "tor-22", "2006:20:20::31", is_bordertor=False)
-
-    # Configure BorderToR to external router connectivity
-    setup_bordertor_ext_connectivity(tgen)
-
-    # Configure external router
-    setup_ext1(tgen)
-
-    # Load FRR configuration for all routers
-    router_list = tgen.routers()
-
-    for rname, router in router_list.items():
-        logger.info(f"Loading configuration for {rname}")
-        router.load_frr_config(os.path.join(CWD, f"{rname}/frr.conf"))
-
-    # Start all routers
-    tgen.start_router()
-
-    # Trigger ARP/NDP to populate MAC tables
-    logger.info("Triggering ARP/NDP for MAC learning")
-
-    # Define VLAN interfaces and their host-gateway mappings
-    vlan_host_gateways = {
-        "swp1": {  # VLAN 111 (VRF2) - 60.1.1.0/24
-            "host-111": "60.1.1.11",
-            "host-121": "60.1.1.12",
-            "host-211": "60.1.1.21",
-            "host-221": "60.1.1.22",
-        },
-        "swp2": {  # VLAN 112 (VRF1) - 50.1.1.0/24
-            "host-211": "50.1.1.21",
-            "host-221": "50.1.1.22",
-        },
-    }
-
-    # Trigger ARP for each VLAN interface
-    for interface, host_gateways in vlan_host_gateways.items():
-        logger.info(f"Triggering ARP on {interface} for {len(host_gateways)} hosts")
-        evpn_trigger_arp_scapy(tgen, host_gateways, interface=interface)
-
-
-def teardown_module(_mod):
-    """Teardown the pytest environment"""
-    tgen = get_topogen()
-
-    # Cleanup VXLAN interfaces and bridges on all VTEPs before stopping
-    logger.info("Cleaning up VXLAN interfaces on all VTEPs")
-    for rname in ["bordertor-11", "bordertor-12", "tor-21", "tor-22"]:
-        if rname in tgen.gears:
-            router = tgen.gears[rname]
-            logger.info(f"Cleaning up interfaces on {rname}")
-
-            # Bring interfaces down first
-            router.run("ip link set dev vlan111 down 2>/dev/null || true")
-            router.run("ip link set dev vlan112 down 2>/dev/null || true")
-            router.run("ip link set dev vlan4001 down 2>/dev/null || true")
-            router.run("ip link set dev vlan4002 down 2>/dev/null || true")
-            router.run("ip link set dev vxlan48 down 2>/dev/null || true")
-            router.run("ip link set dev vxlan99 down 2>/dev/null || true")
-            router.run("ip link set dev br_default down 2>/dev/null || true")
-            router.run("ip link set dev br_l3vni down 2>/dev/null || true")
-
-            # Delete in dependency order
-            router.run("ip link del vlan111 2>/dev/null || true")
-            router.run("ip link del vlan112 2>/dev/null || true")
-            router.run("ip link del vlan4001 2>/dev/null || true")
-            router.run("ip link del vlan4002 2>/dev/null || true")
-            router.run("ip link del vxlan48 2>/dev/null || true")
-            router.run("ip link del vxlan99 2>/dev/null || true")
-            router.run("ip link del br_default 2>/dev/null || true")
-            router.run("ip link del br_l3vni 2>/dev/null || true")
-            router.run("ip link del vrf1 2>/dev/null || true")
-            router.run("ip link del vrf2 2>/dev/null || true")
-
-    tgen.stop_topology()
-
-
-def test_protocols_convergence():
+def test_protocols_convergence(tgen_and_ip_version):
     """
     Assert that all protocols have converged
     """
@@ -605,7 +655,7 @@ def test_protocols_convergence():
         assert result is None, f"{rname} BGP did not converge: {result}"
 
 
-def test_evpn_routes_advertised():
+def test_evpn_routes_advertised(tgen_and_ip_version):
     """
     Check that EVPN routes are advertised on all VTEPs
     """
@@ -634,23 +684,18 @@ def test_evpn_routes_advertised():
         ), f"{rname} EVPN route advertisement check failed: {result}"
 
 
-def test_remote_vteps_per_vni():
+def test_remote_vteps_per_vni(tgen_and_ip_version):
     """
     Verify remote VTEPs are correctly learned for each VNI on all VTEPs
     """
-    tgen = get_topogen()
+    tgen, ip_version = tgen_and_ip_version
     if tgen.routers_have_failure():
         pytest.skip(tgen.errors)
 
-    logger.info("Checking remote VTEPs for each VNI on all 4 VTEPs")
+    logger.info(f"Checking remote VTEPs for each VNI on all 4 VTEPs ({ip_version} underlay)")
 
-    # Define all VTEP IPv6 addresses
-    vtep_ips = {
-        "bordertor-11": "2006:20:20::1",
-        "bordertor-12": "2006:20:20::2",
-        "tor-21": "2006:20:20::30",
-        "tor-22": "2006:20:20::31",
-    }
+    # Get VTEP IPs for the current IP version from module-level VTEP_IPS dictionary
+    vtep_ips = VTEP_IPS[ip_version]
 
     # L2VNIs to check
     vni_list = ["1000111", "1000112"]
@@ -674,23 +719,18 @@ def test_remote_vteps_per_vni():
         assert result is None, f"{rname} remote VTEP verification failed: {result}"
 
 
-def test_vtep_source_ip():
+def test_vtep_source_ip(tgen_and_ip_version):
     """
     Verify VTEP source IP is correctly configured in kernel and FRR for all VNIs on all VTEPs
     """
-    tgen = get_topogen()
+    tgen, ip_version = tgen_and_ip_version
     if tgen.routers_have_failure():
         pytest.skip(tgen.errors)
 
-    logger.info("Checking VTEP source IP configuration on all 4 VTEPs")
+    logger.info(f"Checking VTEP source IP configuration on all 4 VTEPs ({ip_version} underlay)")
 
-    # Define all VTEP IPv6 addresses
-    vtep_ips = {
-        "bordertor-11": "2006:20:20::1",
-        "bordertor-12": "2006:20:20::2",
-        "tor-21": "2006:20:20::30",
-        "tor-22": "2006:20:20::31",
-    }
+    # Get VTEP IPs for the current IP version from module-level VTEP_IPS dictionary
+    vtep_ips = VTEP_IPS[ip_version]
 
     # L2 VNIs to verify
     l2vni_list = ["1000111", "1000112"]
@@ -736,11 +776,11 @@ def test_vtep_source_ip():
         ), f"{rname} L3 VNI VTEP source IP verification failed: {result}"
 
 
-def test_vni_state():
+def test_vni_state(tgen_and_ip_version):
     """
     Verify VNI state on all VTEPs (both L2 and L3 VNIs)
     """
-    tgen = get_topogen()
+    tgen, ip_version = tgen_and_ip_version
     if tgen.routers_have_failure():
         pytest.skip(tgen.errors)
 
@@ -770,7 +810,7 @@ def test_vni_state():
         assert result is None, f"{rname} L3 VNI state verification failed: {result}"
 
 
-def test_l3vni_rmacs():
+def test_l3vni_rmacs(tgen_and_ip_version):
     """
     Verify L3VNI Router MACs (RMACs) from remote VTEPs on all VTEPs.
 
@@ -791,7 +831,7 @@ def test_l3vni_rmacs():
     evpn_verify_l3vni_remote_rmacs(tgen, vtep_routers, l3vni_list)
 
 
-def test_vrf_routes():
+def test_vrf_routes(tgen_and_ip_version):
     """
     Verify routes in VRF1 and VRF2
     """
@@ -813,7 +853,7 @@ def test_vrf_routes():
         logger.info(f"VRF2 routes on {rname}:\n{output}")
 
 
-def test_ipv6_vtep_connectivity():
+def test_ipv6_vtep_connectivity(tgen_and_ip_version):
     """
     Verify IPv6 VTEP connectivity
     """
@@ -831,7 +871,7 @@ def test_ipv6_vtep_connectivity():
         logger.info(f"EVPN next-hops on {rname}:\n{output}")
 
 
-def test_bgp_sessions():
+def test_bgp_sessions(tgen_and_ip_version):
     """
     Verify BGP sessions are established
     """
@@ -859,7 +899,7 @@ def test_bgp_sessions():
         logger.info(f"BGP summary on {rname}:\n{output}")
 
 
-def test_memory_leak():
+def test_memory_leak(tgen_and_ip_version):
     """Run the memory leak test and report results."""
     tgen = get_topogen()
     if not tgen.is_memleak_enabled():

@@ -372,10 +372,61 @@ Triggers ARP/NDP requests from hosts to populate MAC address tables.
 
 ## Running the Test
 
+### IPv4/IPv6 Underlay Parameterization
+
+This test supports both IPv4 and IPv6 underlay configurations through pytest parametrization. By default, it will run both scenarios automatically.
+
+**Directory Structure:**
+```
+bgp_evpn_vxlan_topo2/
+├── test_bgp_evpn_svd_v6_vtep.py    # Main test file
+├── ipv6/                            # IPv6 underlay configs
+│   ├── spine-1/frr.conf
+│   ├── bordertor-11/frr.conf
+│   └── ... (all 16 nodes)
+├── ipv4/                            # IPv4 underlay configs
+│   ├── spine-1/frr.conf
+│   ├── bordertor-11/frr.conf
+│   └── ... (all 16 nodes)
+├── README.md
+└── TOPOLOGY.md
+```
+
+**Key Differences:**
+- **Underlay**: IPv4 vs IPv6 point-to-point links and BGP sessions
+- **VTEP IPs**: IPv6 (2006:20:20::1) vs IPv4 (6.0.0.1) for VXLAN tunnel endpoints
+- **Overlay**: Remains IPv4 (60.1.1.x, 50.1.1.x) for both underlay versions
+- **VRF Peering**: Remains IPv4 (144.1.1.x) for both underlay versions
+
+### Run Both IPv4 and IPv6 Tests
+
 ```bash
 cd tests/topotests/bgp_evpn_vxlan_topo2
 sudo pytest test_bgp_evpn_svd_v6_vtep.py -v -s
 ```
+
+This will automatically run the test twice:
+- Once with IPv4 underlay (using configs from `ipv4/` directory)
+- Once with IPv6 underlay (using configs from `ipv6/` directory)
+
+### Run Specific IP Version Only
+
+```bash
+# Run only IPv4 underlay test
+sudo pytest test_bgp_evpn_svd_v6_vtep.py -v -s -k ipv4
+
+# Run only IPv6 underlay test
+sudo pytest test_bgp_evpn_svd_v6_vtep.py -v -s -k ipv6
+```
+
+### VTEP IP Mapping
+
+| Node         | IPv6 VTEP        | IPv4 VTEP |
+|--------------|------------------|-----------|
+| bordertor-11 | 2006:20:20::1    | 6.0.0.1   |
+| bordertor-12 | 2006:20:20::2    | 6.0.0.2   |
+| tor-21       | 2006:20:20::30   | 6.0.0.30  |
+| tor-22       | 2006:20:20::31   | 6.0.0.31  |
 
 ## Debugging with pdb
 

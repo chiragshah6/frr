@@ -2109,7 +2109,7 @@ class Router(Node):
                     cmdenv += (
                         " /usr/bin/valgrind --num-callers=50"
                         f" --log-file={valgrind_logbase}.%p"
-                        f" --leak-check=full --suppressions={supp_file}"
+                        f" --leak-check=full --track-origins=yes --suppressions={supp_file}"
                     )
                     if valgrind_leak_kinds:
                         cmdenv += f" --show-leak-kinds={valgrind_leak_kinds}"

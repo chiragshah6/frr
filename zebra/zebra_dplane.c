@@ -143,6 +143,7 @@ struct dplane_route_info {
 	/* Nexthops */
 	uint32_t zd_nhg_id;
 	struct nexthop_group zd_ng;
+	struct ipaddr zd_vxlan_encap_src_ip;
 
 	/* Backup nexthops (if present) */
 	struct nexthop_group backup_ng;
@@ -2334,6 +2335,13 @@ const struct nexthop_group *dplane_ctx_get_ng(
 	return &(ctx->u.rinfo.zd_ng);
 }
 
+const struct ipaddr *dplane_ctx_get_vxlan_encap_src_ip(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return &(ctx->u.rinfo.zd_vxlan_encap_src_ip);
+}
+
 const struct nexthop_group *
 dplane_ctx_get_backup_ng(const struct zebra_dplane_ctx *ctx)
 {
@@ -3900,6 +3908,10 @@ int dplane_ctx_route_init(struct zebra_dplane_ctx *ctx, enum dplane_op_e op,
 		if (zl3vni && is_l3vni_oper_up(zl3vni)) {
 			nexthop->nh_encap_type = NET_VXLAN;
 			nexthop->nh_encap.vni = zl3vni->vni;
+			ctx->u.rinfo.zd_vxlan_encap_src_ip = zl3vni->local_vtep_ip;
+			if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
+				zlog_debug("%s vni %u tunnel_ip %pIA", __func__, zl3vni->vni,
+					   &ctx->u.rinfo.zd_vxlan_encap_src_ip);
 		}
 	}
 

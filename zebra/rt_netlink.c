@@ -1698,8 +1698,8 @@ static int build_label_stack(struct mpls_label_stack *nh_label,
 }
 
 static bool _netlink_nexthop_encode_dvni_label(const struct nexthop *nexthop,
-					       struct nlmsghdr *nlmsg,
-					       mpls_lse_t *out_lse,
+					       const struct ipaddr *encap_src_ip,
+					       struct nlmsghdr *nlmsg, mpls_lse_t *out_lse,
 					       size_t buflen, char *label_buf)
 {
 	struct in_addr ipv4;
@@ -1733,13 +1733,19 @@ static bool _netlink_nexthop_encode_dvni_label(const struct nexthop *nexthop,
 		return false;
 	}
 
+	/* Set tunnel source IP */
+	if (encap_src_ip && IS_IPADDR_V4(encap_src_ip)) {
+		if (!nl_attr_put(nlmsg, buflen, LWTUNNEL_IP_SRC, &encap_src_ip->ipaddr_v4, 4))
+			return false;
+	}
+
 	return true;
 }
 
 static bool _netlink_route_encode_label_info(const struct nexthop *nexthop,
-					     struct nlmsghdr *nlmsg,
-					     size_t buflen, struct rtmsg *rtmsg,
-					     char *label_buf,
+					     const struct ipaddr *encap_src_ip,
+					     struct nlmsghdr *nlmsg, size_t buflen,
+					     struct rtmsg *rtmsg, char *label_buf,
 					     size_t label_buf_size)
 {
 	mpls_lse_t out_lse[MPLS_MAX_LABELS];
@@ -1771,9 +1777,8 @@ static bool _netlink_route_encode_label_info(const struct nexthop *nexthop,
 		if (!nest)
 			return false;
 
-		if (_netlink_nexthop_encode_dvni_label(nexthop, nlmsg, out_lse,
-						       buflen,
-						       label_buf) == false)
+		if (_netlink_nexthop_encode_dvni_label(nexthop, encap_src_ip, nlmsg, out_lse,
+						       buflen, label_buf) == false)
 			return false;
 
 		nl_attr_nest_end(nlmsg, nest);
@@ -2046,11 +2051,10 @@ static bool _netlink_nexthop_encode_seg6local_info(const struct nexthop *nexthop
  * The function returns true if the nexthop could be added
  * to the message, otherwise false is returned.
  */
-static bool _netlink_route_build_singlepath(const struct prefix *p,
-					    const char *routedesc, int bytelen,
-					    const struct nexthop *nexthop,
-					    struct nlmsghdr *nlmsg,
-					    struct rtmsg *rtmsg,
+static bool _netlink_route_build_singlepath(const struct prefix *p, const char *routedesc,
+					    int bytelen, const struct nexthop *nexthop,
+					    const struct ipaddr *encap_src_ip,
+					    struct nlmsghdr *nlmsg, struct rtmsg *rtmsg,
 					    size_t req_size, int cmd)
 {
 
@@ -2059,7 +2063,7 @@ static bool _netlink_route_build_singlepath(const struct prefix *p,
 
 	assert(nexthop);
 
-	if (!_netlink_route_encode_label_info(nexthop, nlmsg, req_size, rtmsg,
+	if (!_netlink_route_encode_label_info(nexthop, encap_src_ip, nlmsg, req_size, rtmsg,
 					      label_buf, sizeof(label_buf)))
 		return false;
 
@@ -2271,12 +2275,11 @@ static int netlink_route_nexthop_encap(bool fpm, struct nlmsghdr *n,
  * The function returns true if the nexthop could be added
  * to the message, otherwise false is returned.
  */
-static bool _netlink_route_build_multipath(const struct prefix *p,
-					   const char *routedesc, int bytelen,
-					   const struct nexthop *nexthop,
-					   struct nlmsghdr *nlmsg,
-					   size_t req_size, struct rtmsg *rtmsg,
-					   const union g_addr **src,
+static bool _netlink_route_build_multipath(const struct prefix *p, const char *routedesc,
+					   int bytelen, const struct nexthop *nexthop,
+					   const struct ipaddr *encap_src_ip,
+					   struct nlmsghdr *nlmsg, size_t req_size,
+					   struct rtmsg *rtmsg, const union g_addr **src,
 					   route_tag_t tag, bool fpm)
 {
 	char label_buf[256];
@@ -2289,7 +2292,7 @@ static bool _netlink_route_build_multipath(const struct prefix *p,
 
 	assert(nexthop);
 
-	if (!_netlink_route_encode_label_info(nexthop, nlmsg, req_size, rtmsg,
+	if (!_netlink_route_encode_label_info(nexthop, encap_src_ip, nlmsg, req_size, rtmsg,
 					      label_buf, sizeof(label_buf)))
 		return false;
 
@@ -2408,9 +2411,8 @@ _netlink_mpls_build_singlepath(const struct prefix *p, const char *routedesc,
 
 	family = NHLFE_FAMILY(nhlfe);
 	bytelen = (family == AF_INET ? 4 : 16);
-	return _netlink_route_build_singlepath(p, routedesc, bytelen,
-					       nhlfe->nexthop, nlmsg, rtmsg,
-					       req_size, cmd);
+	return _netlink_route_build_singlepath(p, routedesc, bytelen, nhlfe->nexthop, NULL, nlmsg,
+					       rtmsg, req_size, cmd);
 }
 
 
@@ -2425,9 +2427,8 @@ _netlink_mpls_build_multipath(const struct prefix *p, const char *routedesc,
 
 	family = NHLFE_FAMILY(nhlfe);
 	bytelen = (family == AF_INET ? 4 : 16);
-	return _netlink_route_build_multipath(p, routedesc, bytelen,
-					      nhlfe->nexthop, nlmsg, req_size,
-					      rtmsg, src, 0, false);
+	return _netlink_route_build_multipath(p, routedesc, bytelen, nhlfe->nexthop, NULL, nlmsg,
+					      req_size, rtmsg, src, 0, false);
 }
 
 static void _netlink_mpls_debug(int cmd, uint32_t label, const char *routedesc)
@@ -2542,6 +2543,7 @@ ssize_t netlink_route_multipath_msg_encode(int cmd, struct zebra_dplane_ctx *ctx
 	bool setsrc = false;
 	union g_addr src;
 	const struct prefix *p, *src_p;
+	const struct ipaddr *vxlan_encap_src_ip;
 	uint32_t table_id;
 	struct nlsock *nl;
 	route_tag_t tag = 0;
@@ -2554,6 +2556,7 @@ ssize_t netlink_route_multipath_msg_encode(int cmd, struct zebra_dplane_ctx *ctx
 
 	p = dplane_ctx_get_dest(ctx);
 	src_p = dplane_ctx_get_src(ctx);
+	vxlan_encap_src_ip = dplane_ctx_get_vxlan_encap_src_ip(ctx);
 
 	if (datalen < sizeof(*req))
 		return 0;
@@ -2786,9 +2789,9 @@ ssize_t netlink_route_multipath_msg_encode(int cmd, struct zebra_dplane_ctx *ctx
 				if (!_netlink_set_tag(&req->n, datalen, tag))
 					return 0;
 
-				if (!_netlink_route_build_singlepath(
-					    p, routedesc, bytelen, nexthop,
-					    &req->n, &req->r, datalen, cmd))
+				if (!_netlink_route_build_singlepath(p, routedesc, bytelen, nexthop,
+								     vxlan_encap_src_ip, &req->n,
+								     &req->r, datalen, cmd))
 					return 0;
 
 				/*
@@ -2853,13 +2856,9 @@ ssize_t netlink_route_multipath_msg_encode(int cmd, struct zebra_dplane_ctx *ctx
 						    : "multipath";
 				nexthop_num++;
 
-				if (!_netlink_route_build_multipath(p, routedesc,
-								    bytelen,
-								    nexthop,
-								    &req->n,
-								    datalen,
-								    &req->r,
-								    &src1, tag,
+				if (!_netlink_route_build_multipath(p, routedesc, bytelen, nexthop,
+								    vxlan_encap_src_ip, &req->n,
+								    datalen, &req->r, &src1, tag,
 								    fpm))
 					return 0;
 
@@ -3287,9 +3286,8 @@ ssize_t netlink_nexthop_msg_encode(uint16_t cmd,
 				if (!nest)
 					return 0;
 
-				if (_netlink_nexthop_encode_dvni_label(
-					    nh, &req->n, out_lse, buflen,
-					    label_buf) == false)
+				if (_netlink_nexthop_encode_dvni_label(nh, NULL, &req->n, out_lse,
+								       buflen, label_buf) == false)
 					return 0;
 
 				nl_attr_nest_end(&req->n, nest);

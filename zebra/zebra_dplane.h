@@ -600,6 +600,7 @@ void dplane_ctx_set_nhg_id(struct zebra_dplane_ctx *ctx, uint32_t nhgid);
 uint32_t dplane_ctx_get_nhg_id(const struct zebra_dplane_ctx *ctx);
 const struct nexthop_group *dplane_ctx_get_ng(
 	const struct zebra_dplane_ctx *ctx);
+const struct ipaddr *dplane_ctx_get_vxlan_encap_src_ip(const struct zebra_dplane_ctx *ctx);
 const struct nexthop_group *dplane_ctx_get_old_ng(
 	const struct zebra_dplane_ctx *ctx);
 

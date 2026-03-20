@@ -3910,8 +3910,8 @@ int dplane_ctx_route_init(struct zebra_dplane_ctx *ctx, enum dplane_op_e op,
 			nexthop->nh_encap.vni = zl3vni->vni;
 			ctx->u.rinfo.zd_vxlan_encap_src_ip = zl3vni->local_vtep_ip;
 			if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
-				zlog_debug("%s vni %u tunnel_ip %pIA", __func__, zl3vni->vni,
-					   &ctx->u.rinfo.zd_vxlan_encap_src_ip);
+				zlog_debug("%s vni %u tunnel_ip %pIA re->vrf_id %u", __func__, zl3vni->vni,
+					   &ctx->u.rinfo.zd_vxlan_encap_src_ip, re->vrf_id);
 		}
 	}
 

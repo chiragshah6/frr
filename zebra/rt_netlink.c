@@ -1737,6 +1737,16 @@ static bool _netlink_nexthop_encode_dvni_label(const struct nexthop *nexthop,
 	if (encap_src_ip && IS_IPADDR_V4(encap_src_ip)) {
 		if (!nl_attr_put(nlmsg, buflen, LWTUNNEL_IP_SRC, &encap_src_ip->ipaddr_v4, 4))
 			return false;
+		if (IS_ZEBRA_DEBUG_KERNEL && encap_src_ip)
+			zlog_debug("%s: LWTUNNEL_IP_SRC set to %pIA", __func__,
+				   encap_src_ip);
+	} else if (IS_ZEBRA_DEBUG_KERNEL) {
+		if (!encap_src_ip)
+			zlog_debug("%s: encap_src_ip unset, no LWTUNNEL_IP_SRC", __func__);
+		else
+			zlog_debug(
+				"%s: encap_src_ip %pIA not IPv4, LWTUNNEL_IP_SRC omitted",
+				__func__, encap_src_ip);
 	}
 
 	return true;

@@ -3287,6 +3287,9 @@ ssize_t netlink_nexthop_msg_encode(uint16_t cmd,
 				label_buf, sizeof(label_buf));
 
 			if (num_labels && nh->nh_label_type == ZEBRA_LSP_EVPN) {
+				const struct ipaddr *vxlan_encap_src =
+					dplane_ctx_get_vxlan_encap_src_ip(ctx);
+
 				if (!nl_attr_put16(&req->n, buflen,
 						   NHA_ENCAP_TYPE,
 						   nh_afi))
@@ -3296,8 +3299,10 @@ ssize_t netlink_nexthop_msg_encode(uint16_t cmd,
 				if (!nest)
 					return 0;
 
-				if (_netlink_nexthop_encode_dvni_label(nh, NULL, &req->n, out_lse,
-								       buflen, label_buf) == false)
+				if (_netlink_nexthop_encode_dvni_label(
+					    nh, vxlan_encap_src, &req->n,
+					    out_lse, buflen, label_buf) ==
+				    false)
 					return 0;
 
 				nl_attr_nest_end(&req->n, nest);

@@ -4092,6 +4092,38 @@ int dplane_ctx_nexthop_init(struct zebra_dplane_ctx *ctx, enum dplane_op_e op,
 		ctx->u.rinfo.nhe.nh_grp_count = zebra_nhg_nhe2grp(
 			ctx->u.rinfo.nhe.nh_grp, nhe, MULTIPATH_NUM);
 
+	/*
+	 * Only singleton EVPN DVNI nexthops encode LWTUNNEL_IP_SRC. Groups
+	 * just point at child IDs, so avoid walking all nexthops here.
+	 */
+	SET_IPADDR_NONE(&ctx->u.rinfo.zd_vxlan_encap_src_ip);
+	if (!ctx->u.rinfo.nhe.nh_grp_count) {
+		struct nexthop *nh = ctx->u.rinfo.nhe.ng.nexthop;
+		struct zebra_l3vni *zl3vni = NULL;
+		struct interface *ifp;
+
+		if (nh && (CHECK_FLAG(nh->flags, NEXTHOP_FLAG_EVPN) ||
+			   (nh->nh_label &&
+			    nh->nh_label_type == ZEBRA_LSP_EVPN))) {
+			if (nh->vrf_id)
+				zl3vni = zl3vni_from_vrf(nh->vrf_id);
+			if (!zl3vni && nh->ifindex) {
+				ifp = if_lookup_by_index(nh->ifindex,
+							 nh->vrf_id ?
+							 nh->vrf_id :
+							 nhe->vrf_id);
+				if (ifp)
+					zl3vni = zl3vni_from_vrf(ifp->vrf->vrf_id);
+			}
+			if (!zl3vni)
+				zl3vni = zl3vni_from_vrf(nhe->vrf_id);
+
+			if (zl3vni && is_l3vni_oper_up(zl3vni))
+				ctx->u.rinfo.zd_vxlan_encap_src_ip =
+					zl3vni->local_vtep_ip;
+		}
+	}
+
 	zvrf = vrf_info_lookup(nhe->vrf_id);
 
 	/*

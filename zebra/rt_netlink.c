@@ -2895,8 +2895,6 @@ ssize_t netlink_route_multipath_msg_encode(int cmd, struct zebra_dplane_ctx *ctx
 						 &src.ipv6, bytelen))
 					return 0;
 			}
-			if (IS_ZEBRA_DEBUG_KERNEL)
-				zlog_debug("Setting source");
 		}
 	}
 
@@ -3229,6 +3227,29 @@ ssize_t netlink_nexthop_msg_encode(uint16_t cmd,
 				dplane_ctx_get_nhe_ng(ctx)->nexthop;
 			afi_t afi = dplane_ctx_get_nhe_afi(ctx);
 			enum lwtunnel_encap_types nh_afi = LWTUNNEL_ENCAP_IP;
+
+			if (IS_ZEBRA_DEBUG_KERNEL || IS_ZEBRA_DEBUG_NHG) {
+				if (nh->type == NEXTHOP_TYPE_IPV4
+				    || nh->type == NEXTHOP_TYPE_IPV4_IFINDEX) {
+					zlog_debug(
+						"%s: install nhg_id %u (%s) if %u gate %pI4 src %pI4 rmap_src %pI4",
+						__func__, id, zebra_route_string(type),
+						nh->ifindex, &nh->gate.ipv4,
+						&nh->src.ipv4, &nh->rmap_src.ipv4);
+				} else if (nh->type == NEXTHOP_TYPE_IPV6
+					   || nh->type == NEXTHOP_TYPE_IPV6_IFINDEX) {
+					zlog_debug(
+						"%s: install nhg_id %u (%s) if %u gate %pI6 src %pI6 rmap_src %pI6",
+						__func__, id, zebra_route_string(type),
+						nh->ifindex, &nh->gate.ipv6,
+						&nh->src.ipv6, &nh->rmap_src.ipv6);
+				} else {
+					zlog_debug(
+						"%s: install nhg_id %u (%s) if %u nh_type %u",
+						__func__, id, zebra_route_string(type),
+						nh->ifindex, nh->type);
+				}
+			}
 
 			if (afi == AFI_IP) {
 				req->nhm.nh_family = AF_INET;

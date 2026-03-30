@@ -4880,12 +4880,56 @@ dplane_nexthop_update_internal(struct nhg_hash_entry *nhe, enum dplane_op_e op)
 	enum zebra_dplane_result result = ZEBRA_DPLANE_REQUEST_FAILURE;
 	int ret;
 	struct zebra_dplane_ctx *ctx = NULL;
+	const struct nexthop *nh;
 
 	/* Obtain context block */
 	ctx = dplane_ctx_alloc();
 
 	ret = dplane_ctx_nexthop_init(ctx, op, nhe);
 	if (ret == AOK) {
+		if (IS_ZEBRA_DEBUG_KERNEL || IS_ZEBRA_DEBUG_NHG) {
+			nh = dplane_ctx_get_nhe_ng(ctx)->nexthop;
+
+			if (dplane_ctx_get_nhe_nh_grp_count(ctx)) {
+				zlog_debug(
+					"%s: enqueue %s nhg_id %u (%s) group_count %u",
+					__func__, dplane_op2str(op),
+					dplane_ctx_get_nhe_id(ctx),
+					zebra_route_string(dplane_ctx_get_nhe_type(ctx)),
+					dplane_ctx_get_nhe_nh_grp_count(ctx));
+			} else if (nh) {
+				if (nh->type == NEXTHOP_TYPE_IPV4
+				    || nh->type == NEXTHOP_TYPE_IPV4_IFINDEX) {
+					zlog_debug(
+						"%s: enqueue %s nhg_id %u (%s) if %u gate %pI4 src %pI4 rmap_src %pI4",
+						__func__, dplane_op2str(op),
+						dplane_ctx_get_nhe_id(ctx),
+						zebra_route_string(
+							dplane_ctx_get_nhe_type(ctx)),
+						nh->ifindex, &nh->gate.ipv4,
+						&nh->src.ipv4, &nh->rmap_src.ipv4);
+				} else if (nh->type == NEXTHOP_TYPE_IPV6
+					   || nh->type == NEXTHOP_TYPE_IPV6_IFINDEX) {
+					zlog_debug(
+						"%s: enqueue %s nhg_id %u (%s) if %u gate %pI6 src %pI6 rmap_src %pI6",
+						__func__, dplane_op2str(op),
+						dplane_ctx_get_nhe_id(ctx),
+						zebra_route_string(
+							dplane_ctx_get_nhe_type(ctx)),
+						nh->ifindex, &nh->gate.ipv6,
+						&nh->src.ipv6, &nh->rmap_src.ipv6);
+				} else {
+					zlog_debug(
+						"%s: enqueue %s nhg_id %u (%s) if %u nh_type %u",
+						__func__, dplane_op2str(op),
+						dplane_ctx_get_nhe_id(ctx),
+						zebra_route_string(
+							dplane_ctx_get_nhe_type(ctx)),
+						nh->ifindex, nh->type);
+				}
+			}
+		}
+
 		if (CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_INITIAL_DELAY_INSTALL)) {
 			UNSET_FLAG(nhe->flags, NEXTHOP_GROUP_QUEUED);
 			UNSET_FLAG(nhe->flags, NEXTHOP_GROUP_REINSTALL);

@@ -1201,6 +1201,54 @@ def _discover_vtep_ips(tgen, vtep_routers, vxlan_device="vxlan48"):
     return vtep_ips
 
 
+def _evpn_log_l3vni_nexthop_debug(router, vni, vrfs=("vrf1", "vrf2"), vxlan_device="vxlan48"):
+    """
+    Dump FRR and kernel state relevant to L3VNI nexthop installation.
+
+    This is intended for failure handling, so callers can emit one focused
+    snapshot after retries are exhausted without spamming logs on every poll.
+    """
+
+    def _log_vtysh_json(cmd):
+        try:
+            output = router.vtysh_cmd(cmd, isjson=True)
+            output = json.dumps(output, indent=2, sort_keys=True)
+        except Exception as exc:  # pragma: no cover - debug helper
+            output = f"FAILED: {exc}"
+        logger.info("%s: %s\n%s", router.name, cmd, output)
+
+    def _log_vtysh(cmd):
+        try:
+            output = router.vtysh_cmd(cmd, isjson=False)
+        except Exception as exc:  # pragma: no cover - debug helper
+            output = f"FAILED: {exc}"
+        logger.info("%s: %s\n%s", router.name, cmd, output)
+
+    def _log_linux(cmd):
+        try:
+            output = router.run(cmd)
+        except Exception as exc:  # pragma: no cover - debug helper
+            output = f"FAILED: {exc}"
+        logger.info("%s: %s\n%s", router.name, cmd, output)
+
+    logger.info(
+        "%s: ==== L3VNI nexthop installation debug for VNI %s ====",
+        router.name,
+        vni,
+    )
+    _log_vtysh_json(f"show evpn next-hops vni {vni} json")
+    _log_vtysh_json(f"show evpn rmac vni {vni} json")
+    _log_vtysh_json(f"show bgp l2vpn evpn vni {vni} json")
+    _log_vtysh_json(f"show evpn vni {vni} json")
+    _log_vtysh("show bgp l2vpn evpn route")
+    for vrf in vrfs:
+        _log_vtysh(f"show ip route vrf {vrf}")
+        _log_vtysh(f"show ipv6 route vrf {vrf}")
+        _log_linux(f"ip -j route show vrf {vrf}")
+    _log_linux("ip -j nexthop show")
+    _log_linux(f"ip -j -d link show {vxlan_device}")
+
+
 def evpn_verify_l3vni_remote_nexthops(
     tgen, vtep_routers, l3vni_list, vxlan_device="vxlan48"
 ):
@@ -1258,6 +1306,11 @@ def evpn_verify_l3vni_remote_nexthops(
             evpn_verify_l3vni_nexthops, router, l3vni_list, expected_remote_vteps
         )
         _, result = topotest.run_and_expect(test_func, None, count=60, wait=1)
+        if result is not None:
+            for vni in l3vni_list:
+                _evpn_log_l3vni_nexthop_debug(
+                    router, vni, vxlan_device=vxlan_device
+                )
         assert result is None, f"{rname} L3VNI next-hop verification failed: {result}"
 
 

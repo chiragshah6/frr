@@ -1,0 +1,17 @@
+2026-03-20 10:08:55,299 INFO: topo: Running environment diagnostics
+2026-03-20 10:08:55,299 ERROR: topo: you must run topotest as root
+2026-03-20 10:08:55,306 ERROR: topo: could not find zebra in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find ospfd in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find ospf6d in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find bgpd in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find ripd in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find ripngd in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find isisd in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find pimd in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find pim6d in /usr/lib/frr
+2026-03-20 10:08:55,306 INFO: topo: could not find ldpd in /usr/lib/frr(LDPd tests will not run)
+2026-03-20 10:08:55,306 ERROR: topo: could not find pbrd in /usr/lib/frr
+2026-03-20 10:08:55,306 ERROR: topo: could not find mgmtd in /usr/lib/frr
+2026-03-20 10:08:55,317 DEBUG: topo: checking /usr/bin/python3 -m exabgp for exabgp version >= 4.2.11
+2026-03-20 10:08:55,351 DEBUG: topo: checking /usr/bin/python -m exabgp for exabgp version >= 4.2.11
+2026-03-20 10:08:55,380 WARNING: topo: Failed to find exabgp >= 4.2.11

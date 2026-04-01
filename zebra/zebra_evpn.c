@@ -855,10 +855,48 @@ struct interface *zebra_evpn_map_to_macvlan(struct interface *br_if,
 	return in_param.ret_ifp;
 }
 
+static int zvni_vxlan_map_to_macvlan_ns(struct interface *tmp_if, void *_in_param)
+{
+	struct zebra_from_svi_param *in_param = _in_param;
+	struct zebra_if *zif;
+
+	assert(in_param);
+
+	/* Identify corresponding VLAN interface. */
+
+	/* Check oper status of the SVI. */
+	if (!tmp_if || !if_is_operative(tmp_if))
+		goto done;
+
+	zif = tmp_if->info;
+	if (!zif || zif->zif_type != ZEBRA_IF_MACVLAN)
+		goto done;
+
+	if (zif->link == in_param->vxlan_if) {
+		in_param->ret_ifp = tmp_if;
+		return NS_WALK_STOP;
+	}
+
+done:
+	return NS_WALK_CONTINUE;
+}
 /* Map to MAC-VLAN interface corresponding to specified vxlan-if interface.
  */
 struct interface *zebra_evpn_map_l3svd_to_macvlan(struct interface *vxlan_if)
 {
+	struct zebra_from_svi_param in_param = {};
+
+	in_param.vid = 0;
+	in_param.br_if = NULL;
+	in_param.zif = NULL;
+	in_param.svi_if = NULL;
+	in_param.vxlan_if = vxlan_if;
+
+	/* Identify corresponding VLAN interface. */
+	zebra_ns_ifp_walk_all(zvni_vxlan_map_to_macvlan_ns, &in_param);
+	return in_param.ret_ifp;
+
+#if 0
 	struct zebra_ns *zns;
 	struct route_node *rn;
 	struct interface *tmp_if = NULL;
@@ -889,6 +927,7 @@ struct interface *zebra_evpn_map_l3svd_to_macvlan(struct interface *vxlan_if)
 				   vxlan_if->name, tmp_if->name);
 
 	return found ? tmp_if : NULL;
+#endif
 }
 
 /*

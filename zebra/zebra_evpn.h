@@ -60,6 +60,7 @@ struct zebra_vtep {
 struct zebra_from_svi_param {
 	struct interface *br_if;
 	struct interface *svi_if;
+	struct interface *vxlan_if;
 	struct interface *ret_ifp;
 	struct zebra_if *zif;
 	struct zebra_evpn *zevpn;

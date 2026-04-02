@@ -1732,27 +1732,35 @@ static bool _netlink_nexthop_encode_dvni_label(const struct nexthop *nexthop,
 
 
 static bool _netlink_nexthop_encode_label_info(const struct nexthop *nexthop,
-					       struct nlmsghdr *nlmsg,
-					       mpls_lse_t *out_lse,
-					       size_t buflen, char *label_buf)
+					       struct nlmsghdr *nlmsg, mpls_lse_t *out_lse,
+					       size_t buflen, char *label_buf,
+					       enum lwtunnel_encap_types nh_afi)
 {
 	char buf[1024];
 	struct rtattr *rta = (void *)buf;
 	struct rtattr *nest;
 	struct in_addr ipv4;
+	uint16_t id_attr;
+	uint16_t dst_attr;
+
+	if (nh_afi == LWTUNNEL_ENCAP_IP6) {
+		id_attr = LWTUNNEL_IP6_ID;
+		dst_attr = LWTUNNEL_IP6_DST;
+	} else {
+		id_attr = LWTUNNEL_IP_ID;
+		dst_attr = LWTUNNEL_IP_DST;
+	}
 
 	rta->rta_type = NHA_ENCAP;
 	rta->rta_len = RTA_LENGTH(0);
 
 	nest = nl_rta_nest(rta, sizeof(buf), NHA_ENCAP);
 
-	if (!nl_rta_put64(rta, sizeof(buf), LWTUNNEL_IP_ID,
-			  htobe64((uint64_t)out_lse[0])))
+	if (!nl_rta_put64(rta, sizeof(buf), id_attr, htobe64((uint64_t)out_lse[0])))
 		return false;
 
 	if (nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) {
-		if (!nl_rta_put(rta, sizeof(buf), LWTUNNEL_IP_DST,
-				&nexthop->gate.ipv4, 4))
+		if (!nl_rta_put(rta, sizeof(buf), dst_attr, &nexthop->gate.ipv4, 4))
 			return false;
 	} else if (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX) {
 		if (IS_MAPPED_IPV6(&nexthop->gate.ipv6)) {
@@ -1761,8 +1769,7 @@ static bool _netlink_nexthop_encode_label_info(const struct nexthop *nexthop,
 					&ipv4, 4))
 				return false;
 		} else {
-			if (!nl_rta_put(rta, sizeof(buf), LWTUNNEL_IP_DST,
-					&nexthop->gate.ipv6, 16))
+			if (!nl_rta_put(rta, sizeof(buf), dst_attr, &nexthop->gate.ipv6, 16))
 				return false;
 		}
 	} else {
@@ -1775,7 +1782,7 @@ static bool _netlink_nexthop_encode_label_info(const struct nexthop *nexthop,
 
 	nl_rta_nest_end(rta, nest);
 
-	nl_rta_put16(rta, sizeof(buf), NHA_ENCAP_TYPE, LWTUNNEL_ENCAP_IP);
+	nl_rta_put16(rta, sizeof(buf), NHA_ENCAP_TYPE, nh_afi);
 
 	if (rta->rta_len > RTA_LENGTH(0)) {
 		nl_addraw_l(nlmsg, buflen, RTA_DATA(rta), RTA_PAYLOAD(rta));
@@ -3334,12 +3341,9 @@ ssize_t netlink_nexthop_msg_encode(uint16_t cmd,
 				label_buf, sizeof(label_buf));
 
 			if (num_labels && nh->nh_label_type == ZEBRA_LSP_EVPN) {
-				if (_netlink_nexthop_encode_label_info(nh,
-								       &req->n,
-								       out_lse,
-								       buflen,
-								       label_buf) ==
-				    false) {
+				if (_netlink_nexthop_encode_label_info(nh, &req->n, out_lse,
+								       buflen, label_buf,
+								       nh_afi) == false) {
 					if (IS_ZEBRA_DEBUG_KERNEL)
 						zlog_debug("%s nexthop label encoding failed",
 							   __func__);

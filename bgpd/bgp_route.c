@@ -11437,7 +11437,6 @@ void route_vty_out(struct vty *vty, const struct prefix *p, struct bgp_path_info
 	json_object *json_nexthops = NULL;
 	json_object *json_nexthop_global = NULL;
 	json_object *json_nexthop_ll = NULL;
-	json_object *json_ext_community = NULL;
 	char vrf_id_str[VRF_NAMSIZ] = {0};
 	bool nexthop_self =
 		CHECK_FLAG(path->flags, BGP_PATH_ANNC_NH_SELF) ? true : false;
@@ -11860,13 +11859,9 @@ void route_vty_out(struct vty *vty, const struct prefix *p, struct bgp_path_info
 		}
 		if ((safi == SAFI_EVPN || safi == SAFI_UNREACH) &&
 		    bgp_attr_exists(attr, BGP_ATTR_EXT_COMMUNITIES)) {
-			json_ext_community = json_object_new_object();
-			json_object_string_add(
-				json_ext_community, "string",
-				bgp_attr_get_ecommunity(attr)->str);
-			json_object_object_add(json_path,
-					       "extendedCommunity",
-					       json_ext_community);
+			json_object_object_add(
+				json_path, "extendedCommunity",
+				ecommunity_json(bgp_attr_get_ecommunity(attr)));
 		}
 
 		if (nexthop_self)
@@ -12574,7 +12569,6 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp, struct bgp_dest *bn,
 	json_object *json_cluster_list = NULL;
 	json_object *json_cluster_list_list = NULL;
 	json_object *json_labels = NULL;
-	json_object *json_ext_community = NULL;
 	json_object *json_ext_ipv6_community = NULL;
 	json_object *json_last_update = NULL;
 	json_object *json_pmsi = NULL;
@@ -13350,12 +13344,9 @@ skip_nexthop:
 			ecommunity_str(bgp_attr_get_ecommunity(attr));
 
 		if (json_paths) {
-			json_ext_community = json_object_new_object();
-			json_object_string_add(
-				json_ext_community, "string",
-				bgp_attr_get_ecommunity(attr)->str);
 			json_object_object_add(json_path, "extendedCommunity",
-					       json_ext_community);
+					       ecommunity_json(
+						       bgp_attr_get_ecommunity(attr)));
 		} else {
 			vty_out(vty, "      Extended Community: %s\n",
 				bgp_attr_get_ecommunity(attr)->str);

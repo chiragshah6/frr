@@ -14,6 +14,7 @@
 #include "jhash.h"
 #include "stream.h"
 
+#include "lib/json.h"
 #include "lib/printfrr.h"
 
 #include "bgpd/bgpd.h"
@@ -1528,6 +1529,32 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 char *ecommunity_ecom2str_one(struct ecommunity *ecom, int format, int number)
 {
 	return _ecommunity_ecom2str(ecom, format, 0, number);
+}
+
+json_object *ecommunity_json(struct ecommunity *ecom)
+{
+	json_object *jo;
+	json_object *list;
+
+	if (!ecom || ecom->size == 0)
+		return NULL;
+
+	jo = json_object_new_object();
+	list = json_object_new_array();
+
+	json_object_string_add(jo, "string", ecommunity_str(ecom));
+
+	for (uint32_t i = 0; i < ecom->size; i++) {
+		char *unit = ecommunity_ecom2str_one(
+			ecom, ECOMMUNITY_FORMAT_DISPLAY, i);
+
+		json_object_array_add(list, json_object_new_string(unit));
+		ecommunity_strfree(&unit);
+	}
+
+	json_object_object_add(jo, "list", list);
+
+	return jo;
 }
 
 bool ecommunity_include_one(struct ecommunity *ecom, uint8_t *ptr)

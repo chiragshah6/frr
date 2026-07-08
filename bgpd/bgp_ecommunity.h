@@ -6,6 +6,7 @@
 #ifndef _QUAGGA_BGP_ECOMMUNITY_H
 #define _QUAGGA_BGP_ECOMMUNITY_H
 
+#include "lib/json.h"
 #include "bgpd/bgp_route.h"
 #include "bgpd/bgp_rpki.h"
 #include "bgpd/bgpd.h"
@@ -386,6 +387,7 @@ extern bool ecommunity_include_one(struct ecommunity *ecom, uint8_t *ptr);
 extern bool ecommunity_include(struct ecommunity *e1, struct ecommunity *e2);
 extern bool ecommunity_match(const struct ecommunity *ecom1, const struct ecommunity *ecom2);
 extern const char *ecommunity_str(struct ecommunity *ecom);
+extern json_object *ecommunity_json(struct ecommunity *ecom);
 extern struct ecommunity_val *ecommunity_lookup(const struct ecommunity *ecom,
 						uint8_t type, uint8_t subtype);
 

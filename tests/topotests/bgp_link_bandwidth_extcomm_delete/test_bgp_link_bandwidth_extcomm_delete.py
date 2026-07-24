@@ -85,6 +85,41 @@ def _router_alive(router):
     return None
 
 
+def _bgpd_pid(router):
+    """Return bgpd's PID from inside the router namespace."""
+    return router.run("cat /var/run/frr/bgpd.pid 2>/dev/null").strip()
+
+
+def _check_bgpd_survived(router, expected_pid):
+    """
+    Require bgpd to stay up through subgroup advertisement / LB replace.
+
+    Catches daemon death, restart (PID change), and missing process without
+    relying only on a final vtysh ping.
+    """
+    alive = _router_alive(router)
+    if alive:
+        return alive
+
+    core_traces = router.checkRouterCores(reportLeaks=False, reportOnce=True)
+    if core_traces:
+        return "{}: core detected after subgroup advertisement: {}".format(
+            router.name, core_traces.strip()
+        )
+
+    current_pid = _bgpd_pid(router)
+    if not current_pid:
+        return "{}: bgpd pid file disappeared".format(router.name)
+    if current_pid != expected_pid:
+        return "{}: bgpd restarted during subgroup advertisement (PID {} -> {})".format(
+            router.name, expected_pid, current_pid
+        )
+    if router.run("test -d /proc/{}; echo $?".format(current_pid)).strip() != "0":
+        return "{}: bgpd process {} is not alive".format(router.name, current_pid)
+
+    return None
+
+
 def _check_sessions():
     r3 = get_topogen().gears["r3"]
 
@@ -133,14 +168,14 @@ def _check_weighted_multipath():
     return None
 
 
-def _check_export_after_lb_delete():
+def _check_export_after_lb_delete(expected_pid):
     tgen = get_topogen()
     r3 = tgen.gears["r3"]
     r4 = tgen.gears["r4"]
 
-    alive = _router_alive(r3)
-    if alive:
-        return "r3 crashed while building adj-out after LB delete: {}".format(alive)
+    survived = _check_bgpd_survived(r3, expected_pid)
+    if survived:
+        return "r3 failed around LB replace/adj-out install: {}".format(survived)
 
     # Also confirm advertised-routes on the DUT itself, then receiver RIB.
     adv = json.loads(
@@ -177,8 +212,10 @@ def _check_export_after_lb_delete():
     if ROUTE_TARGET not in ecoms:
         return "r4 lost {}: {!r}".format(ROUTE_TARGET, ecoms)
 
-    logger.debug(
-        "export after LB delete ok: r3 alive, advertised/received ecom=%r", ecoms
+    logger.info(
+        "no crash during subgroup advertisement: r3 bgpd PID %s unchanged, ecom=%r",
+        expected_pid,
+        ecoms,
     )
     return None
 
@@ -204,22 +241,31 @@ def test_delete_link_bandwidth_no_adj_out_crash():
     )
     assert result is None, result
 
+    r3 = tgen.gears["r3"]
+    bgpd_pid = _bgpd_pid(r3)
+    assert bgpd_pid, "r3: unable to capture bgpd PID before subgroup advertisement"
+
     _, result = topotest.run_and_expect(
-        _check_export_after_lb_delete, None, count=30, wait=1
+        functools.partial(_check_export_after_lb_delete, bgpd_pid),
+        None,
+        count=30,
+        wait=1,
     )
     assert result is None, result
 
-    # Force a second announce cycle after the policy has already been applied.
-    r3 = tgen.gears["r3"]
+    # Re-run subgroup_announce_check / adj-out (includes ecommunity_replace_linkbw).
     r3.vtysh_cmd("clear bgp ipv6 unicast * soft out")
 
     _, result = topotest.run_and_expect(
-        _check_export_after_lb_delete, None, count=30, wait=1
+        functools.partial(_check_export_after_lb_delete, bgpd_pid),
+        None,
+        count=30,
+        wait=1,
     )
     assert result is None, result
 
-    alive = _router_alive(r3)
-    assert alive is None, alive
+    survived = _check_bgpd_survived(r3, bgpd_pid)
+    assert survived is None, survived
 
 
 if __name__ == "__main__":

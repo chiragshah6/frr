@@ -3247,15 +3247,24 @@ bool subgroup_announce_check(struct bgp_dest *dest, struct bgp_path_info *pi,
 							  bgp_attr_get_ipv6_ecommunity(
 								  attr),
 							  cum_bw, false, true));
-		else
-			bgp_attr_set_ecommunity(
-				attr,
-				ecommunity_replace_linkbw(
-					bgp->as, bgp_attr_get_ecommunity(attr),
-					cum_bw,
-					CHECK_FLAG(peer->flags,
-						   PEER_FLAG_DISABLE_LINK_BW_ENCODING_IEEE),
-					false));
+		else {
+			struct ecommunity *old_ecom = bgp_attr_get_ecommunity(attr);
+			struct ecommunity *new_ecom;
+
+			new_ecom = ecommunity_replace_linkbw(
+				bgp->as, old_ecom, cum_bw,
+				CHECK_FLAG(peer->flags,
+					   PEER_FLAG_DISABLE_LINK_BW_ENCODING_IEEE),
+				false);
+
+			/* ecommunity_replace_linkbw() returns old_ecom when
+			 * there is no transitive link-bandwidth to replace.
+			 */
+			if (old_ecom && old_ecom != new_ecom && !old_ecom->refcnt)
+				ecommunity_free(&old_ecom);
+
+			bgp_attr_set_ecommunity(attr, new_ecom);
+		}
 	}
 
 	/*

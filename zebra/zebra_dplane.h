@@ -1028,6 +1028,14 @@ enum zebra_dplane_result dplane_route_update(struct route_node *rn,
 					     struct route_entry *re,
 					     struct route_entry *old_re);
 
+/*
+ * True if an install/update of 're' cannot be enqueued yet because the kernel
+ * NHG it uses is neither installed nor queued (dplane_ctx_route_init() would
+ * fail it with ENOENT).
+ */
+bool dplane_route_kernel_nhg_not_ready(const struct route_node *rn, const struct route_entry *re,
+				       enum dplane_op_e op);
+
 enum zebra_dplane_result dplane_route_delete(struct route_node *rn,
 					     struct route_entry *re);
 

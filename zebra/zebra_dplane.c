@@ -4399,6 +4399,53 @@ int dplane_ctx_route_init_basic(struct zebra_dplane_ctx *ctx,
 }
 
 /*
+ * Return true if an install/update of this route cannot be enqueued because
+ * the kernel NHG it uses is neither installed nor queued.  Deletes only use
+ * the prefix, so they are never "not ready".
+ *
+ * Shared by dplane_ctx_route_init(), which then fails with ENOENT, and by
+ * rib_install_kernel(), which uses it to skip the enqueue instead of logging
+ * an error for a condition zebra already knows about.  The tracepoint is
+ * emitted here so it fires once whichever caller finds the NHG not ready.
+ */
+bool dplane_route_kernel_nhg_not_ready(const struct route_node *rn, const struct route_entry *re,
+				       enum dplane_op_e op)
+{
+#ifdef HAVE_NETLINK
+	struct nhg_hash_entry *nhe;
+	struct zebra_vrf *zvrf;
+
+	if (!zebra_nhg_kernel_nexthops_enabled())
+		return false;
+
+	if (op != DPLANE_OP_ROUTE_INSTALL && op != DPLANE_OP_ROUTE_UPDATE)
+		return false;
+
+	nhe = zebra_nhg_resolve(re->nhe);
+	zvrf = vrf_info_lookup(re->vrf_id);
+	/* The NHG is in the kernel or its install is in flight, so the route can be enqueued. */
+	if (CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED) ||
+	    CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_QUEUED)) {
+		if (IS_ZEBRA_DEBUG_DPLANE_DETAIL || IS_ZEBRA_DEBUG_RIB_DETAILED)
+			zlog_debug("%s (%s:%u:%u)%pRN op %s nhg id %u flags 0x%x installed or queued, ready",
+				   __func__, zvrf_name(zvrf), re->vrf_id, re->table, rn,
+				   dplane_op2str(op), nhe->id, nhe->flags);
+		return false;
+	}
+
+	frrtrace(4, frr_zebra, dplane_ctx_route_kernel_nhg_not_ready, op, nhe->id, nhe->flags,
+		 re->vrf_id);
+	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL || IS_ZEBRA_DEBUG_RIB_DETAILED)
+		zlog_debug("%s (%s:%u:%u)%pRN op %s nhg id %u flags 0x%x nh %pNHs not installed nor queued",
+			   __func__, zvrf_name(zvrf), re->vrf_id, re->table, rn, dplane_op2str(op),
+			   nhe->id, nhe->flags, nhe->nhg.nexthop);
+	return true;
+#else
+	return false;
+#endif /* HAVE_NETLINK */
+}
+
+/*
  * Initialize a context block for a route update from zebra data structs.
  * If the `rn` or `re` parameters are NULL, this function only initializes the
  * dplane context without copying a route object into it.
@@ -4574,20 +4621,8 @@ int dplane_ctx_route_init(struct zebra_dplane_ctx *ctx, enum dplane_op_e op,
 		 * If its a delete we only use the prefix anyway, so this only
 		 * matters for INSTALL/UPDATE.
 		 */
-		if (zebra_nhg_kernel_nexthops_enabled() &&
-		    (((op == DPLANE_OP_ROUTE_INSTALL) || (op == DPLANE_OP_ROUTE_UPDATE)) &&
-		     !CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED) &&
-		     !CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_QUEUED))) {
-			frrtrace(4, frr_zebra, dplane_ctx_route_kernel_nhg_not_ready, op, nhe->id,
-				 nhe->flags, re->vrf_id);
-			if (IS_ZEBRA_DEBUG_DPLANE_DETAIL || IS_ZEBRA_DEBUG_RIB_DETAILED)
-				zlog_debug("%s (%s:%u:%u)%pRN op %s nhg id %u flags 0x%x nh %pNHs not installed nor queued",
-					   __func__, zvrf_name(zvrf), re->vrf_id, re->table, rn,
-					   dplane_op2str(op), nhe->id, nhe->flags,
-					   nhe->nhg.nexthop);
-
+		if (dplane_route_kernel_nhg_not_ready(rn, re, op))
 			return ENOENT;
-		}
 	}
 #endif /* HAVE_NETLINK */
 

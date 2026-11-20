@@ -691,6 +691,7 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 	struct rib_table_info *info = srcdest_rnode_table_info(rn);
 	struct zebra_vrf *zvrf = zebra_vrf_lookup_by_id(re->vrf_id);
 	enum zebra_dplane_result ret;
+	bool nhg_not_ready = false;
 
 	rib_dest_t *dest = rib_dest_from_rnode(rn);
 
@@ -716,11 +717,25 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 	 */
 	hook_call(rib_update, rn, "installing in kernel");
 
-	/* Send add or update */
-	if (old)
+	/*
+	 * A protocol-owned NHG (e.g. a bgpd SoO NHG) can be invalid and not
+	 * installed here, for instance when the kernel removed it with the only
+	 * interface it used.  Zebra cannot install it, and the dplane would only
+	 * fail this route with ENOENT, so skip the enqueue and treat it as the
+	 * expected install failure below instead of logging an error.  The
+	 * route is handled exactly like any other failed enqueue.
+	 */
+	if (re->nhe && PROTO_OWNED(re->nhe) &&
+	    dplane_route_kernel_nhg_not_ready(rn, re,
+					      old ? DPLANE_OP_ROUTE_UPDATE
+						  : DPLANE_OP_ROUTE_INSTALL)) {
+		nhg_not_ready = true;
+		ret = ZEBRA_DPLANE_REQUEST_FAILURE;
+	} else if (old) {
 		ret = dplane_route_update(rn, re, old);
-	else
+	} else {
 		ret = dplane_route_add(rn, re);
+	}
 
 	switch (ret) {
 	case ZEBRA_DPLANE_REQUEST_QUEUED:
@@ -736,9 +751,15 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 		break;
 	case ZEBRA_DPLANE_REQUEST_FAILURE:
 	{
-		flog_err(EC_ZEBRA_DP_INSTALL_FAIL,
-			 "(%s:%u:%u)%pRN: Failed to enqueue dataplane install",
-			 zvrf_name(zvrf), re->vrf_id, re->table, rn);
+		if (nhg_not_ready) {
+			if (IS_ZEBRA_DEBUG_RIB_DETAILED || IS_ZEBRA_DEBUG_DPLANE_DETAIL)
+				zlog_debug("(%s:%u:%u)%pRN: dataplane install skipped, kernel nexthop group %u not installed",
+					   zvrf_name(zvrf), re->vrf_id, re->table, rn, re->nhe->id);
+		} else {
+			flog_err(EC_ZEBRA_DP_INSTALL_FAIL,
+				 "(%s:%u:%u)%pRN: Failed to enqueue dataplane install",
+				 zvrf_name(zvrf), re->vrf_id, re->table, rn);
+		}
 		break;
 	}
 	case ZEBRA_DPLANE_REQUEST_SUCCESS:

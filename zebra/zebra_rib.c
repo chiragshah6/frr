@@ -685,9 +685,8 @@ int zebra_rib_labeled_unicast(struct route_entry *re)
 /*
  * Return true if the kernel NHG used by this route is neither installed nor
  * queued, so an install or update of the route cannot be enqueued yet.  The
- * dataplane would only reject it with ENOENT (see dplane_ctx_route_init()),
- * so rib_install_kernel() skips the enqueue instead of logging an error for
- * a state zebra already knows about.
+ * kernel has no such nexthop id, so rib_install_kernel() skips the enqueue
+ * instead of logging an error for a state zebra already knows about.
  *
  * rib_install_kernel() calls zebra_nhg_install_kernel() first, which queues
  * the NHG when it can be installed.  Only the install and update ops are
